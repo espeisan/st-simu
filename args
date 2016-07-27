@@ -1,0 +1,125 @@
+-dim 2
+-dt 0.001
+-finaltime 5
+-maxts -40
+-renumber_dofs 0
+-print_step 1
+-has_convec 1
+-unsteady   1
+-boundary_smoothing 0
+-force_mesh_velocity 0
+-nonlinear_elasticity 0
+-mesh_adapt 1
+-fprint_ca 0
+beta1 0.0
+beta2 1.0
+-plot_es 1
+-family_files 1
+-sst -1.e-7
+-utheta 0.5
+-vtheta 0.5
+-quadr_c 4
+-quadr_f 3
+-quadr_r 2
+-quadr_e 8
+-ale 1
+-force_pressure 0
+-print_to_matlab 1
+
+-pc_type lu lu 
+pc_factor_mat_solver_package mumps
+mat_mumps_icntl_7 2
+pc_factor_levels 2
+sub_pc_factor_levels 1
+pc_composite_type multiplicative
+pc_composite_pcs ilu,ilu
+-ksp_type preonly
+ksp_initial_guess_nonzero 1
+ksp_gmres_restart 300
+-pc_factor_shift_type NONZERO
+-pc_factor_shift_amount 1.e-12
+pc_factor_mat_ordering_type natural
+-pc_factor_reuse_ordering 1
+pc_factor_nonzeros_along_diagonal 1.e-10
+pc_factor_diagonal_fill
+
+pc_factor_fill 3.22746e-06
+pc_factor_in_place
+-ksp_rtol 1e-11
+
+log_trace stdout
+malloc_debug 1
+snes_fd 0
+-snes_linesearch_type basic
+snes_type test ksponly
+snes_picard_alpha 1.2
+snes_test_display 1
+snes_monitor_cancel 0
+-snes_monitor stdout
+snes_converged_reason 1
+-snes_stol 1.e-11
+-snes_rtol 1.e-11
+snes_atol 1.e-12
+ksp_monitor stdout
+-snes_max_it 20
+mat_no_inode 1
+
+-print_to_matlab 0
+-force_dirichlet 1
+fp_trap 1
+-on_error_abort 1
+
+vec_type seqpthread
+mat_type seqaijpthread
+thread_sync_type LOCKFREE
+vec_threads 3
+mat_threads 3
+use_thread_pool main
+nthreads 3
+
+canal      dir_tags 2,1 neum_tags 3 feature_tags 3
+solid 2d    dir_tags 13  fsi_tags 14  fonly_tags 15,13
+solid 2d 2b dir_tags 1-5,33  fsi_tags 5  fonly_tags 1-5,100,33
+solid 2d 3b dir_tags 1-6  fsi_tags 101-104  fonly_tags 1-7
+solid 2d 3b dir_tags 1-6  fsi_tags 101,102  fonly_tags 1-6,10
+solid 2d 3b -dir_tags 1-6  -fsi_tags 101-111  -fonly_tags 1-6,10
+solid 2d Nb dir_tags 1-6  fsi_tags 101-111  fonly_tags 1-6,10
+
+function_space 1
+function_space 2
+function_space 3
+function_space 4
+function_space 5
+function_space 6
+function_space 7
+function_space 8
+function_space 9
+
+mesh_type 8
+mesh_type 16
+mesh_type 32
+mesh_type 64
+mesh_type 128
+mesh_type 256
+mesh_type 512
+mesh_type 1024
+mesh_type 2048
+mesh_type 4096
+
+fin results/canal/canal_ord1.msh
+fout results/canal/canal.vtk
+
+fin results/sol_asc/2d/1sol1.msh
+fout results/sol_asc/2d/1sol1/1sol1_.vtk
+min results/sol_asc/2d/1sol.txt
+hout results/sol_asc/2d/1sol1
+
+-fin results/sol_asc/2d/2sol1.msh
+-fout results/sol_asc/2d/2sol1/2sol1_.vtk
+-min results/sol_asc/2d/2sol.txt
+-hout results/sol_asc/2d/2sol1
+
+fin results/sol_asc/2d/Nsol1.msh
+fout results/sol_asc/2d/Nsol1/Nsol1_.vtk
+min results/sol_asc/2d/Nsol1.txt
+hout results/sol_asc/2d/Nsol1
