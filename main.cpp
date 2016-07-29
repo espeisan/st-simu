@@ -266,7 +266,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
-  is_bdf3            = PETSC_FALSE;
+  is_bdf3            = PETSC_TRUE;
   is_bdf2            = PETSC_FALSE;
   is_bdf_bdf_extrap  = PETSC_FALSE;
   is_bdf_ab          = PETSC_FALSE;
@@ -480,10 +480,12 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
       is >> mass; is >> rad; is >> vol;
       is >> xg; is >> yg; if(dim == 3){is >> zg;}
       Xg << xg, yg, zg;
-      MV.push_back(mass); RV.push_back(rad); VV.push_back(vol); XG_1.push_back(Xg); XG_0.push_back(Xg);
+      MV.push_back(mass); RV.push_back(rad); VV.push_back(vol);
+      XG_1.push_back(Xg); XG_0.push_back(Xg); XG_aux.push_back(Xg);
     }
     is.close();
-    MV.resize(N_Solids); RV.resize(N_Solids); VV.resize(N_Solids); XG_1.resize(N_Solids); XG_0.resize(N_Solids);
+    MV.resize(N_Solids); RV.resize(N_Solids); VV.resize(N_Solids);
+    XG_1.resize(N_Solids); XG_0.resize(N_Solids); XG_aux.resize(N_Solids);
   }
 
   if (flg_hout){
@@ -1353,14 +1355,13 @@ PetscErrorCode AppCtx::setInitialConditions()
 {
   PetscErrorCode      ierr(0);
 
-  Vector    Uf(dim), Zf(LZ), Us(3), XG_temp(3);
+  Vector    Uf(dim), Zf(LZ);
   Vector    X(dim);
   Tensor    R(dim,dim);
   VectorXi  dofs(dim);  //global components unknowns enumeration from point dofs
   VectorXi  dofs_fs(LZ);
-  Vector3d  Xg;
-  int       nod_id, nod_is;
-  int       tag;
+  Vector3d  Xg, XG_temp, Us;
+  int       nod_id, nod_is, tag;
 
   VecZeroEntries(Vec_v_mid);  //this size(V) = size(X) = size(U)
   VecZeroEntries(Vec_x_0);
@@ -1540,31 +1541,27 @@ PetscErrorCode AppCtx::setInitialConditions()
           // saving uzp n-1 and n-2
           //VecCopy(Vec_uzp_1,Vec_uzp_m1);
           //-----
-          //VecCopy(Vec_uzp_0,Vec_uzp_m2);
-          //-----
+          VecCopy(Vec_uzp_0,Vec_uzp_m2);
+          /*///-----
           VecCopy(Vec_uzp_1, Vec_duzp_0);
           VecAXPY(Vec_duzp_0,-1.0,Vec_uzp_0);
           VecScale(Vec_duzp_0, 1./dt);  //duzp_0=(uzp_1-uzp_0)/dt
-          //-----
-          // saving geometry n-2
+          /*///-----
           VecCopy(Vec_x_0, Vec_x_aux);
           copyVec2Mesh(Vec_x_1);
-          // saving data n-1
-          VecCopy(Vec_uzp_1, Vec_uzp_0);
           VecCopy(Vec_x_1, Vec_x_0);
           if (N_Solids) {XG_aux = XG_0; XG_0 = XG_1;}
+          VecCopy(Vec_uzp_1, Vec_uzp_0);
         }
         else
         {
-          // saving uzp n-1 and n-2
           //-----
-          //VecCopy(Vec_uzp_0,Vec_uzp_m1);
-          //-----
+          VecCopy(Vec_uzp_0,Vec_uzp_m1);
+          /*///-----
           VecCopy(Vec_uzp_1, Vec_duzp);
           VecAXPY(Vec_duzp,-1.0,Vec_uzp_0);
           VecScale(Vec_duzp, 1./dt);  //duzp_0=(uzp_1-uzp_0)/dt
-          //-----
-
+          /*///-----
           copyVec2Mesh(Vec_x_1);
 
           // solving geometry before the (u,p)
@@ -1575,18 +1572,18 @@ PetscErrorCode AppCtx::setInitialConditions()
           // copyMesh2Vec(Vec_x_0); // we need Vec_x_0 later, don't touch it
           // estraga Vec_uzp_0, usado porque não se precisa mais
           //-----
-          //VecScale(Vec_uzp_0,-3.0);
-          //VecAXPY(Vec_uzp_0,3.0,Vec_uzp_1);
-          //VecAXPY(Vec_uzp_0,1.0,Vec_uzp_m2);
+          VecScale(Vec_uzp_0,-3.0);
+          VecAXPY(Vec_uzp_0,3.0,Vec_uzp_1);
+          VecAXPY(Vec_uzp_0,1.0,Vec_uzp_m2);
           //View(Vec_uzp_0,"matrizes/vuzp_0m.m","vuzpm_0m");
-          ///-----
+          /*///-----
           VecCopy(Vec_duzp, Vec_uzp_0);
           VecScale(Vec_uzp_0, 2.0);
           VecAXPY(Vec_uzp_0,-1.0,Vec_duzp_0);
           VecScale(Vec_uzp_0, dt);
           VecAXPY(Vec_uzp_0, 1.0,Vec_uzp_1); // Vec_up_0 tem agora a extrapolacao do futuro Vec_up_1
           View(Vec_uzp_0,"matrizes/vuzp_0o.m","vuzpm_0o");
-          ///-----
+          /*///-----
 
           // calc V^{n+1} and update with D_{3}X^{n+1} = dt*V^{n+1}
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.0, Vec_v_1, current_time);  //vtheta = 0 porque Vec_uzp_0 JÁ É o extrapolado
@@ -1597,21 +1594,9 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecAXPY(Vec_x_1,-9./11.,Vec_x_0);
           copyMesh2Vec(Vec_x_0);
           VecAXPY(Vec_x_1,18./11.,Vec_x_0);
-          if (N_Solids){// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
-            for (int s = 0; s < N_Solids; s++){
-              for (int l = 0; l < dim; l++){
-                dofs(l) = n_unknowns_u + n_unknowns_p + LZ*(s+1) - LZ + l;
-              }
-              VecGetValues(Vec_uzp_0, dim, dofs.data(), Us.data());
-              XG_temp   = XG_1[s];
-              XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*Us;
-              XG_aux[s] = XG_0[s];
-              XG_0[s]   = XG_temp;
-            }
-            //XG_aux = XG_0;
-            //XG_0 = XG_1;
-          }
+          if (N_Solids){moveCenterMass(0.0);}// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
           VecCopy(Vec_uzp_1, Vec_uzp_0);
+          VecCopy(Vec_v_1,Vec_v_mid);
         }
       }//end if bdf3
     }//end for bdf3 for m
@@ -1836,18 +1821,15 @@ PetscErrorCode AppCtx::solveTimeProblem()
     {
       if (plot_exact_sol)
         computeError(Vec_x_0, Vec_uzp_0,current_time);
-
-      //VecCopy(Vec_uzp_m1,Vec_uzp_m2);
-      //VecCopy(Vec_uzp_0,Vec_uzp_m1);
-
+      //-----
+      VecCopy(Vec_uzp_m1,Vec_uzp_m2);
+      VecCopy(Vec_uzp_0,Vec_uzp_m1);
+      /*///-----
       VecCopy(Vec_duzp, Vec_duzp_0);
       VecCopy(Vec_uzp_1, Vec_duzp);
       VecAXPY(Vec_duzp,-1.0,Vec_uzp_0); // Vec_dup -= Vec_up_0
       VecScale(Vec_duzp, 1./dt);
-
-      //VecCopy(Vec_x_1, Vec_v_mid);
-      //VecAXPY(Vec_v_mid,-1.0,Vec_x_0); // Vec_v_mid -= Vec_x_0
-      //VecScale(Vec_v_mid, 1./dt);
+      /*///-----
     }
     else  //for MR-AB, modifies P from Vec_uzp_0
     {
@@ -1968,17 +1950,19 @@ PetscErrorCode AppCtx::solveTimeProblem()
         VecAXPY(Vec_x_1,-3.0,Vec_x_0);
         VecAXPY(Vec_x_1, 1.0,Vec_x_aux);
         // copyMesh2Vec(Vec_x_0); // we need Vec_x_0 later, don't touch it
-        // estraga Vec_up_0
-        //VecScale(Vec_uzp_0,-3.0);
-        //VecAXPY(Vec_uzp_0,3.0,Vec_uzp_1);
-        //VecAXPY(Vec_uzp_0,1.0,Vec_uzp_m2);
-        ////-----
+        // estraga Vec_up_0, usado porque não se precisa mais
+        //-----
+        VecScale(Vec_uzp_0,-3.0);
+        VecAXPY(Vec_uzp_0,3.0,Vec_uzp_1);
+        VecAXPY(Vec_uzp_0,1.0,Vec_uzp_m2);
+        /*///-----
         VecCopy(Vec_duzp, Vec_uzp_0);
         VecScale(Vec_uzp_0, 2.0);
         VecAXPY(Vec_uzp_0,-1.0,Vec_duzp_0);
         VecScale(Vec_uzp_0, dt);
         VecAXPY(Vec_uzp_0, 1.0,Vec_uzp_1); // Vec_up_0 tem agora a extrapolacao do futuro Vec_up_1
-        ////-----
+        /*///-----
+
         // calc V^{n+1} and update with D_{3}X^{n+1} = dt*V^{n+1}
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.0, Vec_v_1, current_time);  //comentado?
         VecCopy(Vec_v_1, Vec_x_1);
@@ -1988,19 +1972,9 @@ PetscErrorCode AppCtx::solveTimeProblem()
         VecAXPY(Vec_x_1,-9./11.,Vec_x_0);
         copyMesh2Vec(Vec_x_0);
         VecAXPY(Vec_x_1,18./11.,Vec_x_0);
-        if (N_Solids){// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
-          for (int s = 0; s < N_Solids; s++){
-            for (int l = 0; l < dim; l++){
-              dofs(l) = n_unknowns_u + n_unknowns_p + LZ*(s+1) - LZ + l;
-            }
-            VecGetValues(Vec_uzp_0, dim, dofs.data(), U0.data());
-            XG_temp   = XG_1[s];
-            XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*U0;
-            XG_aux[s] = XG_0[s];
-            XG_0[s]   = XG_temp;
-          }
-        }
-        // the VecCopy(Vec_uzp_1, Vec_uzp_0) and XG_0 = XG_1 are done after the end if ale
+        if (N_Solids){moveCenterMass(0.0);}// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
+        // VecCopy(Vec_uzp_1, Vec_uzp_0) is done after the end if ale
+        VecCopy(Vec_v_1,Vec_v_mid);
       }
       else  //for MR-AB
       {
@@ -2110,9 +2084,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
       else
         vtk_printer.addCellScalarVtk("pressure", GetDataPressCellVersion(q_array, *this));
 
-
       vtk_printer.addCellIntVtk("cell_tag", GetDataCellTag(*this));
-
 
       //vtk_printer.printPointTagVtk("point_tag");
       VecRestoreArray(Vec_uzp_0, &q_array);  //VecRestoreArray(Vec_up_0, &q_array);
@@ -2814,7 +2786,7 @@ PetscErrorCode AppCtx::updateSolidVel()
 PetscErrorCode AppCtx::moveCenterMass(double vtheta)
 {
   VectorXi    dofs(dim);
-  Vector      U0(dim), U1(dim), tmp(Vector::Zero(3)), XG_temp(3);
+  Vector      U0(Vector::Zero(3)), U1(Vector::Zero(3)), XG_temp(Vector::Zero(3));
 
   for (int s = 0; s < N_Solids; s++){
 
@@ -2831,9 +2803,8 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
       XG_0[s]   = XG_temp;
     }
     else{  //for MR-AB
-      for (int l = 0; l < dim; l++){tmp(l) = vtheta*U1(l) + (1.-vtheta)*U0(l);}
       XG_temp = XG_1[s];
-      XG_1[s] = dt*tmp + XG_0[s];
+      XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
       XG_0[s] = XG_temp;
     }
 

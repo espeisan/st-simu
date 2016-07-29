@@ -92,6 +92,8 @@ void invert_a(TensorType & a, int dim)
 
 }
 
+// ====================================================================================================
+
 template <typename Derived>
 void getProjectorMatrix(MatrixBase<Derived> & P, int n_nodes, int const* nodes, Vec const& Vec_x_, double t, AppCtx const& app)
 {
@@ -156,7 +158,6 @@ void getProjectorMatrix(MatrixBase<Derived> & P, int n_nodes, int const* nodes, 
 
   } // end nodes
 } // end getProjectorMatrix
-
 
 // ====================================================================================================
 
@@ -332,7 +333,7 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       VecGetValues(Vec_x_0, mapV_c.size(), mapV_c.data(), x_coefs_c.data());  //cout << x_coefs_c << endl;
       VecGetValues(Vec_x_1, mapV_c.size(), mapV_c.data(), x_coefs_c_new.data());  //cout << x_coefs_c_new << endl;
 
-      if ((is_bdf2 && time_step > 0) || (is_bdf3 && time_step > 1)) //the integration geometry is X^{n+1}
+      if ((is_bdf2 && time_step > 0) || (is_bdf3 && time_step > 1)) //the integration geometry is \bar{X}^{n+1}
         x_coefs_c = x_coefs_c_new;
       else
         x_coefs_c = (1.-utheta)*x_coefs_c + utheta*x_coefs_c_new;
@@ -983,12 +984,12 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         }
         else if (is_bdf3 && time_step > 1)
         {
-          //Uqp_m1 = u_coefs_c_om1_trans * phi_c[qp];
-          //Uqp_m2 = u_coefs_c_om2_trans * phi_c[qp];
-          //dUdt    = 11./6.*dUdt - 7./6.*Uqp_old/dt + 3./2.*Uqp_m1/dt - 1./3.*Uqp_m2;
-          dUqp_old   = du_coefs_c_old_trans  * phi_c[qp];
-          dUqp_vold  = du_coefs_c_vold_trans * phi_c[qp];
-          dUdt = 11./6.*dUdt - 7./6.*dUqp_old + 1./3.*dUqp_vold;  //D3f^{n+1}/dt = 11/6 D1f^{n+1}/dt
+          Uqp_m1 = u_coefs_c_om1_trans * phi_c[qp];
+          Uqp_m2 = u_coefs_c_om2_trans * phi_c[qp];
+          dUdt    = 11./6.*dUdt - 7./6.*Uqp_old/dt + 3./2.*Uqp_m1/dt - 1./3.*Uqp_m2;
+          //dUqp_old   = du_coefs_c_old_trans  * phi_c[qp];
+          //dUqp_vold  = du_coefs_c_vold_trans * phi_c[qp];
+          //dUdt = 11./6.*dUdt - 7./6.*dUqp_old + 1./3.*dUqp_vold;  //D3f^{n+1}/dt = 11/6 D1f^{n+1}/dt
         }                                                         //      -7/6(U^{n}-U^{n-1})/dt + 1/3 (U^{n-1}-U^{n-2})/dt
 
         //dxU, dUdt, Uconv_qp correction (adding solid contribution)
@@ -1028,9 +1029,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           dxU      += dxZ;                    //cout << dxU << endl;
           Uconv_qp += Zqp;
           dUdt     += (Zqp_new-Zqp_old)/dt;
-          //if (is_bdf3 && time_step > 1){
-          //  dUdt += 5./6.*Zqp_new/dt - 2.*Zqp_old/dt + 3./2.*Uqp_m1/dt - 1./3.*Uqp_m2;
-          //}
+          if (is_bdf3 && time_step > 1){
+            dUdt += 5./6.*Zqp_new/dt - 2.*Zqp_old/dt + 3./2.*Uqp_m1/dt - 1./3.*Uqp_m2;
+          }
         }
 
         force_at_mid = force(Xqp,current_time+utheta*dt,tag);
@@ -1462,6 +1463,14 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     Vector     Grav(3*(dim-1)), Fpp(3*(dim-1)), Fpw(3*(dim-1));
     TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ);
     TensorZ    MI = TensorZ::Zero(LZ,LZ);
+    double ddt_factor;
+    if (is_bdf2 && time_step > 0)
+      ddt_factor = 1.5;
+    else
+    if (is_bdf3 && time_step > 1)
+      ddt_factor = 11./6.;
+    else
+      ddt_factor = 1.;
 //    double     zet = 0.05, ep = 7.0e-6, epw = ep/10.0;
 
     for (int K = 0; K < N_Solids; K++){
@@ -1622,11 +1631,11 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         cout << endl;
       }
       if (is_bdf3 && time_step > 1){
-        //dZdt = 11./6.*dZdt - 7./6.*z_coefs_old/dt + 3./2.*z_coefs_om1 - 1./3.*z_coefs_om2;
+        //dZdt = 11./6.*dZdt - 7./6.*z_coefs_old/dt + 3./2.*z_coefs_om1/dt - 1./3.*z_coefs_om2/dt;
       }
       MI = MI_tensor(MV[K],RV[K],dim);
       FZsloc = MI*dZdt - MV[K]*Grav - Fpp - Fpw;
-      Z3sloc = MI/dt;
+      Z3sloc = MI/dt; //ddt_factor*
 //#ifdef FEP_HAS_OPENMP
 //      FEP_PRAGMA_OMP(critical)
 //#endif
