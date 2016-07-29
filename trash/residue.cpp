@@ -332,6 +332,7 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       VecGetValues(Vec_x_0, mapV_c.size(), mapV_c.data(), x_coefs_c.data());  //cout << x_coefs_c << endl;
       VecGetValues(Vec_x_1, mapV_c.size(), mapV_c.data(), x_coefs_c_new.data());  //cout << x_coefs_c_new << endl;
 
+      //if (current_time < .5*dt)
       if ((is_bdf2 && time_step > 0) || (is_bdf3 && time_step > 1)) //the integration geometry is X^{n+1}
         x_coefs_c = x_coefs_c_new;
       else
@@ -996,7 +997,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         Zqp = Vector::Zero(dim);
 
         if (SFI){
-          if (is_bdf3 && time_step > 1){
+          if (is_bdf3){
             u_coefs_c_om1 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
             VecGetValues(Vec_uzp_m1,  mapU_t.size(), mapU_t.data(), u_coefs_c_om1.data()); // bdf2,bdf3
             u_coefs_c_om1_trans = u_coefs_c_om1.transpose();
@@ -1028,7 +1029,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           dxU      += dxZ;                    //cout << dxU << endl;
           Uconv_qp += Zqp;
           dUdt     += (Zqp_new-Zqp_old)/dt;
-          //if (is_bdf3 && time_step > 1){
+          //if (is_bdf3){
           //  dUdt += 5./6.*Zqp_new/dt - 2.*Zqp_old/dt + 3./2.*Uqp_m1/dt - 1./3.*Uqp_m2;
           //}
         }
@@ -1037,6 +1038,8 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
         weight = quadr_cell->weight(qp);
         JxW_mid = J_mid*weight;
+//        JxW_old = J_old*weight;
+//        JxW_new = J_new*weight;
 
         if (J_mid < 1.e-14)
         {
@@ -1216,12 +1219,92 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
         }  //end if SFI
 
+#if(false)
         // ----------------
         //
         //  STABILIZATION
         //
         //  ----------------
+        if (behaviors & (BH_bble_condens_PnPn | BH_bble_condens_CR))
+        {
+          dxbble = invFT_c_mid * dLbble[qp];
 
+          for (int c = 0; c < dim; c++)
+          {
+            for (int j = 0; j < n_dofs_u_per_cell/dim; j++)
+            {
+              for (int d = 0; d < dim; d++)
+              {
+                delta_cd = c==d;
+
+                if (compact_bubble)
+                {
+                  Bbn(c, j*dim + d) += JxW_mid*
+                                       ( utheta*visc*(delta_cd * dxphi_c.row(j).dot(dxbble) + dxphi_c(j,c)*dxbble(d)) ); // rigidez
+
+                  Bnb(j*dim + d, c) += JxW_mid*
+                                       ( utheta*visc*(delta_cd * dxphi_c.row(j).dot(dxbble) + dxphi_c(j,c)*dxbble(d)) ); // rigidez
+                }
+                else
+                {
+                  Bbn(c, j*dim + d) += JxW_mid*
+                                       ( has_convec*bble[qp]*utheta *rho*( delta_cd*Uconv_qp.dot(dxphi_c.row(j)) + dxU(c,d)*phi_c[qp][j] ) // convective
+                                       + unsteady*delta_cd*rho*bble[qp]*phi_c[qp][j]/dt // time derivative
+                                       + utheta*visc*(delta_cd * dxphi_c.row(j).dot(dxbble) + dxphi_c(j,c)*dxbble(d)) ); // rigidez
+
+                  Bnb(j*dim + d, c) += JxW_mid*
+                                       ( has_convec*phi_c[qp][j]*utheta *rho*( delta_cd*Uconv_qp.dot(dxbble) ) // convective
+                                       + delta_cd*rho*phi_c[qp][j]*bble[qp]/dt * unsteady // time derivative
+                                       + utheta*visc*(delta_cd * dxphi_c.row(j).dot(dxbble) + dxphi_c(j,c)*dxbble(d)) ); // rigidez
+                }
+              }
+            }
+            if (behaviors & BH_bble_condens_PnPn)
+              for (int j = 0; j < n_dofs_p_per_cell; ++j)
+                Gbp(c, j) -= JxW_mid*psi_c[qp][j]*dxbble(c);
+          }
+
+          for (int c = 0; c < dim; c++)
+          {
+            for (int d = 0; d < dim; d++)
+            {
+              delta_cd = c==d;
+
+              if (compact_bubble)
+              {
+                iBbb(c, d) += JxW_mid*
+                              ( utheta*visc*(delta_cd* dxbble.dot(dxbble) + dxbble(d)*dxbble(c)) ); // rigidez
+              }
+              else
+              {
+                iBbb(c, d) += JxW_mid*
+                              ( has_convec*bble[qp]*utheta *rho*( delta_cd*Uconv_qp.dot(dxbble) ) // convective
+                              + delta_cd*rho*bble[qp]*bble[qp]/dt * unsteady // time derivative
+                              + utheta*visc*(delta_cd* dxbble.dot(dxbble) + dxbble(d)*dxbble(c)) ); // rigidez
+              }
+
+
+            }
+            if (compact_bubble)
+            {
+              FUb(c) += JxW_mid*
+                        ( visc*dxbble.dot(dxU.row(c) + dxU.col(c).transpose()) - //rigidez
+                          Pqp_new*dxbble(c) - // pressão
+                          force_at_mid(c)*bble[qp] ); // força
+            }
+            else
+            {
+              FUb(c) += JxW_mid*
+                        ( bble[qp]*rho*(dUdt(c)*unsteady + has_convec*Uconv_qp.dot(dxU.row(c))) + // time derivative + convective
+                          visc*dxbble.dot(dxU.row(c) + dxU.col(c).transpose()) - //rigidez
+                          Pqp_new*dxbble(c) - // pressão
+                          force_at_mid(c)*bble[qp] ); // força
+            }
+
+          }
+        }
+        else
+#endif
         if(behaviors & BH_GLS)
         {
           Res = rho*( dUdt * unsteady + has_convec*dxU*Uconv_qp) + dxP_new - force_at_mid;
@@ -1271,7 +1354,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           for (int i = 0; i < n_dofs_p_per_cell; ++i)
             FPloc(i) -= JxW_mid *tauk* dxpsi_c.row(i).dot(Res);  //minus?
             //FPloc(i) -= JxW_mid *tauk* dxpsi_c.row(i).dot(dxP_new - force_at_mid); // somente laplaciano da pressao
-
+#if (true)
           if (SFI){
             // residue
             for (int I = 0; I < nodes_per_cell; I++){
@@ -1397,10 +1480,142 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
               }
             }//end for J Z5
           } //end SFI
-
+#endif
         } //end if(behaviors & BH_GLS)
+#if (false)
+        if (behaviors & BH_bble_condens_CR)
+        {
+          bble_integ += JxW_mid*bble[qp];
 
+          for (int c = 0; c < dim; ++c)
+          {
+            for (int i = 0; i < n_dofs_u_per_cell/dim; ++i)
+              for (int j = 0; j < dim; ++j) // pressure gradient
+                Gnx(i*dim + c,j) -= JxW_mid* (Xqp(j) - Xc(j))*dxphi_c(i,c);
+
+            FPx(c) -= JxW_mid* dxU.trace()*(Xqp(c) - Xc(c));
+          }
+        }
+#endif
       } // fim quadratura
+#if(false)
+      //Dloc += utheta*Gloc.transpose();
+
+      //
+      // stabilization
+      //
+      if ((behaviors & BH_bble_condens_PnPn) && !compact_bubble)
+      {
+        //iBbb = iBbb.inverse().eval();
+        invert(iBbb,dim);
+
+        FUloc = FUloc - Bnb*iBbb*FUb;
+        FPloc = FPloc - utheta*Gbp.transpose()*iBbb*FUb;
+
+        Dpb = utheta*Gbp.transpose();
+
+        // correções com os coeficientes da bolha
+
+        Ubqp = -utheta*iBbb*FUb; // U bolha no tempo n+utheta
+
+        for (int qp = 0; qp < n_qpts_cell; ++qp)
+        {
+          F_c_mid = x_coefs_c_mid_trans * dLqsi_c[qp];
+          inverseAndDet(F_c_mid, dim, invF_c_mid,J_mid);
+          invFT_c_mid= invF_c_mid.transpose();
+
+          Uqp = u_coefs_c_mid_trans * phi_c[qp]; //n+utheta
+          dxbble = invFT_c_mid * dLbble[qp];
+          dxUb = Ubqp*dxbble.transpose();
+
+          weight = quadr_cell->weight(qp);
+          JxW_mid = J_mid*weight;
+
+          for (int j = 0; j < n_dofs_u_per_cell/dim; ++j)
+          {
+            for (int i = 0; i < n_dofs_u_per_cell/dim; ++i)
+            {
+              Ten = has_convec*JxW_mid*rho*utheta*phi_c[qp][i]* phi_c[qp][j] * dxUb; // advecção
+
+              for (int c = 0; c < dim; ++c)
+                for (int d = 0; d < dim; ++d)
+                  Aloc(i*dim + c, j*dim + d) += Ten(c,d);
+            }
+            Ten = has_convec*JxW_mid* rho*utheta* bble[qp] * phi_c[qp][j] *dxUb; // advecção
+            for (int c = 0; c < dim; ++c)
+              for (int d = 0; d < dim; ++d)
+                Bbn(c, j*dim + d) += Ten(c,d);
+          }
+        } // fim quadratura 2 vez
+
+        Aloc -= Bnb*iBbb*Bbn;
+        Gloc -= Bnb*iBbb*Gbp;
+        Dloc -= Dpb*iBbb*Bbn;
+        Eloc = -Dpb*iBbb*Gbp;
+
+      }
+      if(behaviors & BH_GLS)
+      {
+        Gloc += Cloc;
+      }
+      if(behaviors & BH_bble_condens_CR)
+      {
+        Ubqp.setZero();
+        //for (int i = 0; i < Gnx.cols(); ++i)
+        // for (int j = 0; j < Gnx.rows(); ++j)
+        // Ubqp(i) += Gnx(j,i)*u_coefs_c_new(j);
+        //Ubqp /= -bble_integ;
+        //Ubqp *= utheta;
+
+        for (int c = 0; c < dim; ++c)
+          for (int i = 0; i < n_dofs_u_per_cell/dim; ++i)
+            for (int j = 0; j < dim; ++j) // pressure gradient
+              //Gnx(i*dim + c,j) -= JxW_mid* (Xqp(j) - Xc(j))*dxphi_c(i,c);
+            Ubqp(j) += Gnx(i*dim + c,j) * u_coefs_c_mid_trans(c,i);
+
+        Ubqp /= -bble_integ;
+        Ubqp *= utheta;
+
+
+        //Ubqp = -Gnx.transpose()*u_coefs_c_new; // U bolha no tempo n+utheta
+
+        for (int qp = 0; qp < n_qpts_cell; ++qp)
+        {
+          F_c_mid = x_coefs_c_mid_trans * dLqsi_c[qp];
+          inverseAndDet(F_c_mid, dim, invF_c_mid,J_mid);
+          invFT_c_mid= invF_c_mid.transpose();
+
+          Uqp = u_coefs_c_mid_trans * phi_c[qp]; //n+utheta
+          dxbble = invFT_c_mid * dLbble[qp];
+          dxUb = Ubqp*dxbble.transpose();
+
+          weight = quadr_cell->weight(qp);
+          JxW_mid = J_mid*weight;
+
+          for (int j = 0; j < n_dofs_u_per_cell/dim; ++j)
+          {
+            for (int i = 0; i < n_dofs_u_per_cell/dim; ++i)
+            {
+              Ten = has_convec*JxW_mid*rho*utheta*phi_c[qp][i]* phi_c[qp][j] * dxUb; // advecção
+
+              for (int c = 0; c < dim; ++c)
+                for (int d = 0; d < dim; ++d)
+                  Aloc(i*dim + c, j*dim + d) += Ten(c,d);
+            }
+            Ten = has_convec*JxW_mid* rho*utheta* bble[qp] * phi_c[qp][j] *dxUb; // advecção
+            for (int c = 0; c < dim; ++c)
+              for (int d = 0; d < dim; ++d)
+                Bbn(c, j*dim + d) += Ten(c,d);
+          }
+        } // fim quadratura 2 vez
+
+        double const a = 1./(bble_integ*bble_integ);
+        double const b = 1./bble_integ;
+        Aloc += utheta*a*Gnx*iBbb*Gnx.transpose() - utheta*b*Bnb*Gnx.transpose() - b*Gnx*Bbn;
+
+        FUloc += a*Gnx*iBbb*FPx - b*Bnb*FPx - b*Gnx*FUb;
+      }
+#endif  //for debug
 
 //cout << "\n" << FUloc << endl; cout << "\n" << Aloc << endl; cout << "\n" << Gloc << endl; cout << "\n" << Dloc << endl;
       // Projection - to force non-penetrarion bc
@@ -1643,10 +1858,532 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 #if (false)
   // LOOP NAS FACES DO CONTORNO (Neumann)
   //~ FEP_PRAGMA_OMP(parallel default(none) shared(Vec_uzp_k,Vec_fun_fs,cout))
+  {
+    int                 tag;
+    bool                is_neumann;
+    bool                is_surface;
+    bool                is_solid;
+    //MatrixXd           u_coefs_c_new(n_dofs_u_per_facet/dim, dim);
+    //VectorXd           p_coefs_f(n_dofs_p_per_facet);
+    MatrixXd            u_coefs_f_mid_trans(dim, n_dofs_u_per_facet/dim);  // n+utheta
+    MatrixXd            u_coefs_f_old(n_dofs_u_per_facet/dim, dim);        // n
+    MatrixXd            u_coefs_f_new(n_dofs_u_per_facet/dim, dim);        // n+1
+    MatrixXd            u_coefs_f_old_trans(dim,n_dofs_u_per_facet/dim);   // n
+    MatrixXd            u_coefs_f_new_trans(dim,n_dofs_u_per_facet/dim);   // n+1
+
+    MatrixXd            x_coefs_f_mid_trans(dim, n_dofs_v_per_facet/dim); // n+utheta
+    MatrixXd            x_coefs_f_new(n_dofs_v_per_facet/dim, dim);       // n+1
+    MatrixXd            x_coefs_f_new_trans(dim, n_dofs_v_per_facet/dim); // n+1
+    MatrixXd            x_coefs_f_old(n_dofs_v_per_facet/dim, dim);       // n
+    MatrixXd            x_coefs_f_old_trans(dim, n_dofs_v_per_facet/dim); // n
+
+    MatrixXd            noi_coefs_f_new(n_dofs_v_per_facet/dim, dim);  // normal interpolada em n+1
+    MatrixXd            noi_coefs_f_new_trans(dim, n_dofs_v_per_facet/dim);  // normal interpolada em n+1
+
+    Tensor              F_f_mid(dim,dim-1);       // n+utheta
+    Tensor              invF_f_mid(dim-1,dim);    // n+utheta
+    Tensor              fff_f_mid(dim-1,dim-1);   // n+utheta; fff = first fundamental form
+    //Tensor              invFT_c_mid(dim,dim);   // n+utheta
+
+    MatrixXd            Aloc_f(n_dofs_u_per_facet, n_dofs_u_per_facet);
+    VectorXd            FUloc(n_dofs_u_per_facet);
+
+    MatrixXd            tmp(n_dofs_u_per_facet,n_dofs_u_per_facet);
+
+    VectorXi            mapU_f(n_dofs_u_per_facet);
+    VectorXi            mapP_f(n_dofs_p_per_facet);
+    VectorXi            mapM_f(dim*nodes_per_facet);
+
+    MatrixXd            Prj(n_dofs_u_per_facet,n_dofs_u_per_facet);
+
+    MatrixXd            dxphi_f(n_dofs_u_per_facet/dim, dim);
+    Tensor              dxU_f(dim,dim);   // grad u
+    Vector              Xqp(dim);
+    Vector              Xqp2(dim);
+    Vector              Xqp_new(dim);
+    Vector              Xqp_old(dim);
+    Vector              Uqp(dim);
+    Vector              Uqp_new(dim);
+    Vector              Uqp_old(dim);
+    //VectorXd          FUloc(n_dofs_u_per_facet);
+    VectorXi            facet_nodes(nodes_per_facet);
+    Vector              normal(dim);
+    Vector              noi(dim); // normal interpolada
+    Vector              some_vec(dim);
+    double              J_mid=0,JxW_mid;
+    double              weight=0;
+    //double              visc;
+    //double              rho;
+    Vector              Uqp_solid(dim);
+
+    Vector              traction_(dim);
+
+    //~ const int tid = omp_get_thread_num();
+    //~ const int nthreads = omp_get_num_threads();
+//~
+    //~ facet_iterator facet = mesh->facetBegin(tid,nthreads);
+    //~ facet_iterator facet_end = mesh->facetEnd(tid,nthreads);
+
+    // LOOP NAS FACES DO CONTORNO
+    facet_iterator facet = mesh->facetBegin();
+    facet_iterator facet_end = mesh->facetEnd();  // the next if controls the for that follows
+    if (neumann_tags.size() != 0 || interface_tags.size() != 0 || solid_tags.size() != 0)
+    for (; facet != facet_end; ++facet)
+    {
+      tag = facet->getTag();
+      is_neumann = is_in(tag, neumann_tags);
+      is_surface = is_in(tag, interface_tags);
+      is_solid   = is_in(tag, solid_tags);
+
+      //if ((!is_neumann))
+      if ((!is_neumann) && (!is_surface) && (!is_solid))
+      //PetscFunctionReturn(0);
+        continue;
+
+      // mapeamento do local para o global:
+      //
+      dof_handler[DH_UNKS].getVariable(VAR_U).getFacetDofs(mapU_f.data(), &*facet);  cout << mapU_f << endl << endl;  //unk. global ID's
+      dof_handler[DH_UNKS].getVariable(VAR_P).getFacetDofs(mapP_f.data(), &*facet);  //cout << mapP_f << endl;
+      dof_handler[DH_MESH].getVariable(VAR_M).getFacetDofs(mapM_f.data(), &*facet);  //cout << mapM_f << endl;
+
+      VecGetValues(Vec_normal,  mapM_f.size(), mapM_f.data(), noi_coefs_f_new.data());
+      VecGetValues(Vec_x_0,     mapM_f.size(), mapM_f.data(), x_coefs_f_old.data());
+      VecGetValues(Vec_x_1,     mapM_f.size(), mapM_f.data(), x_coefs_f_new.data());
+      VecGetValues(Vec_up_0,    mapU_f.size(), mapU_f.data(), u_coefs_f_old.data());
+      VecGetValues(Vec_uzp_k ,   mapU_f.size(), mapU_f.data(), u_coefs_f_new.data());
+
+      // get nodal coordinates of the old and new cell
+      mesh->getFacetNodesId(&*facet, facet_nodes.data());
+
+      x_coefs_f_old_trans = x_coefs_f_old.transpose();
+      x_coefs_f_new_trans = x_coefs_f_new.transpose();
+      u_coefs_f_old_trans = u_coefs_f_old.transpose();
+      u_coefs_f_new_trans = u_coefs_f_new.transpose();
+      noi_coefs_f_new_trans = noi_coefs_f_new.transpose();
+
+      u_coefs_f_mid_trans = utheta*u_coefs_f_new_trans + (1.-utheta)*u_coefs_f_old_trans;
+      x_coefs_f_mid_trans = utheta*x_coefs_f_new_trans + (1.-utheta)*x_coefs_f_old_trans;
+
+      FUloc.setZero();
+      Aloc_f.setZero();
+
+      //visc = muu(tag);
+      //rho  = pho(Xqp,tag);
+
+      //noi_coefs_f_new_trans = x_coefs_f_mid_trans;
+
+
+      for (int qp = 0; qp < n_qpts_facet; ++qp)
+      {
+
+        F_f_mid   = x_coefs_f_mid_trans * dLqsi_f[qp];
+
+        if (dim==2)
+        {
+          normal(0) = +F_f_mid(1,0);
+          normal(1) = -F_f_mid(0,0);
+          normal.normalize();
+        }
+        else
+        {
+          normal = cross(F_f_mid.col(0), F_f_mid.col(1));
+          normal.normalize();
+        }
+
+        fff_f_mid.resize(dim-1,dim-1);
+        fff_f_mid  = F_f_mid.transpose()*F_f_mid;
+        J_mid     = sqrt(fff_f_mid.determinant());
+        invF_f_mid = fff_f_mid.inverse()*F_f_mid.transpose();
+
+        weight  = quadr_facet->weight(qp);
+        JxW_mid = J_mid*weight;
+        Xqp     = x_coefs_f_mid_trans * qsi_f[qp]; // coordenada espacial (x,y,z) do ponto de quadratura
+        dxphi_f = dLphi_f[qp] * invF_f_mid;
+        dxU_f   = u_coefs_f_mid_trans * dxphi_f; // n+utheta
+        Uqp     = u_coefs_f_mid_trans * phi_f[qp];
+        noi     = noi_coefs_f_new_trans * qsi_f[qp];
+
+        if (is_neumann)
+        {
+          //Vector no(Xqp);
+          //no.normalize();
+          //traction_ = utheta*(traction(Xqp,current_time+dt,tag)) + (1.-utheta)*traction(Xqp,current_time,tag);
+          traction_ = traction(Xqp, normal, current_time + dt*utheta,tag);
+          //traction_ = (traction(Xqp,current_time,tag) +4.*traction(Xqp,current_time+dt/2.,tag) + traction(Xqp,current_time+dt,tag))/6.;
+
+          for (int i = 0; i < n_dofs_u_per_facet/dim; ++i)
+          {
+            for (int c = 0; c < dim; ++c)
+            {
+              FUloc(i*dim + c) -= JxW_mid * traction_(c) * phi_f[qp][i] ; // força
+            }
+          }
+        }
+
+        if (is_surface)
+        {
+          //Vector no(Xqp);
+          //no.normalize();
+          for (int i = 0; i < n_dofs_u_per_facet/dim; ++i)
+          {
+            for (int c = 0; c < dim; ++c)
+            {
+//              FUloc(i*dim + c) += JxW_mid *gama(Xqp,current_time,tag)*(dxphi_f(i,c) + (unsteady*dt) *dxU_f.row(c).dot(dxphi_f.row(i))); // correto
+              FUloc(i*dim + c) += JxW_mid *gama(Xqp,current_time,tag)*dxphi_f(i,c); //inicialmente descomentado
+              //FUloc(i*dim + c) += JxW_mid *gama(Xqp,current_time,tag)*normal(c)* phi_f[qp][i];
+              //for (int d = 0; d < dim; ++d)
+              //  FUloc(i*dim + c) += JxW_mid * gama(Xqp,current_time,tag)* ( (c==d?1:0) - noi(c)*noi(d) )* dxphi_f(i,d) ;
+              //FUloc(i*dim + c) += JxW_mid * gama(Xqp,current_time,tag)* ( unsteady*dt *dxU_f.row(c).dot(dxphi_f.row(i)));
+            }
+          }
+
+          if (false) // semi-implicit term //inicialmente false
+          {
+            for (int i = 0; i < n_dofs_u_per_facet/dim; ++i)
+              for (int j = 0; j < n_dofs_u_per_facet/dim; ++j)
+                for (int c = 0; c < dim; ++c)
+                  Aloc_f(i*dim + c, j*dim + c) += utheta*JxW_mid* (unsteady*dt) *gama(Xqp,current_time,tag)*dxphi_f.row(i).dot(dxphi_f.row(j));
+          }
+
+        }
+
+        if (is_solid)
+        {
+          Uqp_solid = solid_veloc(Xqp, current_time+utheta*dt, tag);
+
+          for (int i = 0; i < n_dofs_u_per_facet/dim; ++i)
+          {
+            for (int c = 0; c < dim; ++c)
+            {
+              FUloc(i*dim + c) += JxW_mid *beta_diss()*(Uqp(c)-Uqp_solid(c))*phi_f[qp][i];
+              //FUloc(i*dim + c) += x_coefs_f_old_trans.norm()*beta_diss()*Uqp(c)*phi_f[qp][i];
+
+              for (int j = 0; j < n_dofs_u_per_facet/dim; ++j)
+                  Aloc_f(i*dim + c, j*dim + c) += utheta*JxW_mid *beta_diss()*phi_f[qp][j]*phi_f[qp][i];
+
+            }
+          }
+        }
+
+      } // end quadratura
+
+
+      // Projection - to force non-penetrarion bc
+      mesh->getFacetNodesId(&*facet, facet_nodes.data());
+      getProjectorMatrix(Prj, nodes_per_facet, facet_nodes.data(), Vec_x_1, current_time+dt, *this);
+
+      FUloc = Prj*FUloc;
+      Aloc_f = Prj*Aloc_f*Prj;
+
+      //~ FEP_PRAGMA_OMP(critical)
+      {
+        VecSetValues(Vec_fun_fs, mapU_f.size(), mapU_f.data(), FUloc.data(), ADD_VALUES);
+        MatSetValues(*JJ, mapU_f.size(), mapU_f.data(), mapU_f.size(), mapU_f.data(), Aloc_f.data(),  ADD_VALUES);
+      }
+
+    }  //end for facet
+
+
+  } // end LOOP NAS FACES DO CONTORNO (Neumann)
+
 
   // LINHA DE CONTATO
   //FEP_PRAGMA_OMP(parallel shared(Vec_uzp_k,Vec_fun_fs,cout) default(none))
- #endif
+  {
+    // will be useful I hope
+    //Real const eps = std::numeric_limits<Real>::epsilon();
+    //Real const eps_root = pow(eps,1./3.);
+    //double            h;
+    //volatile double   hh;
+
+    int              tag;
+    bool             is_triple;
+
+    VectorXd         FUloc(n_dofs_u_per_corner);
+    MatrixXd         Aloc_r(n_dofs_u_per_corner, n_dofs_u_per_corner);
+
+    VectorXi         mapU_r(n_dofs_u_per_corner);
+    VectorXi         mapP_r(n_dofs_p_per_corner);
+
+    MatrixXd         Prj(n_dofs_u_per_corner,n_dofs_u_per_corner);
+    VectorXi         corner_nodes(nodes_per_corner);
+
+    bool                gen_error = false;
+    //MatrixXd             u_coefs_r_mid(n_dofs_u_per_corner/dim, dim);
+    MatrixXd            u_coefs_r_mid_trans(dim, n_dofs_u_per_corner/dim);  // n+utheta
+    MatrixXd            u_coefs_r_old(n_dofs_u_per_corner/dim, dim);        // n
+    MatrixXd            u_coefs_r_new(n_dofs_u_per_corner/dim, dim);        // n+1
+    MatrixXd            x_coefs_r_mid_trans(dim, nodes_per_corner);
+    MatrixXd            x_coefs_r_new(nodes_per_corner, dim);
+    MatrixXd            x_coefs_r_old(nodes_per_corner, dim);
+    Tensor              F_r_mid(dim,dim-2);
+    Tensor              invF_r_mid(dim-2,dim);
+    MatrixXd            dxphi_r(n_dofs_u_per_corner/dim, dim);
+    Tensor              dxU_r(dim,dim);   // grad u
+    Vector              Xqp(dim);
+    Vector              Uqp(dim);
+    //VectorXd          FUloc(n_dofs_u_per_corner);
+    //MatrixXd         Aloc_r(n_dofs_u_per_corner, n_dofs_u_per_corner);
+    Vector              normal(dim);
+    Vector              line_normal(dim);
+    Vector              solid_point(dim); // ponto na superfície do sólido .. ele é único
+    Vector              point_a(dim); // ponto na linha triplice
+    Vector              point_b(dim); // ponto na linha triplice
+    Vector              ifacet_normal(dim); // ponto na linha triplice
+    double              line_normal_sign = 0; // +1 or -1
+    double              J_mid=0, JxW_mid;
+    double              weight=0;
+    double              gama_mid;
+    //double              visc;
+    //double              rho;
+    int                 iCs[FEPIC_MAX_ICELLS];
+    int                 eiCs[FEPIC_MAX_ICELLS];
+    int                 *iCs_end;
+    int                 *iCs_it;
+    Cell                *fluid_cell;
+
+    //VectorXi            mapU_r(n_dofs_u_per_corner);
+    //VectorXi            mapP_r(n_dofs_p_per_corner);
+    VectorXi            mapM_r(dim*nodes_per_corner);
+
+    //const int tid = omp_get_thread_num();
+    //const int nthreads = omp_get_num_threads();
+    //const int n_corner_colors = mesh->numCornerColors();
+
+
+    // LOOP NAS ARESTAS DA LINHA TRIPLICE
+    CellElement * corner;
+
+    if (triple_tags.size() != 0)
+    for (int _r = 0; _r < n_corners_total; ++_r)
+    {
+      if (dim==2)
+      {
+        corner = mesh->getNodePtr(_r);
+        if (!mesh->isVertex(corner))
+          continue;
+      }
+      else
+        corner = mesh->getCornerPtr(_r);
+      if (corner->isDisabled())
+        continue;
+
+      tag = corner->getTag();
+      is_triple = is_in(tag,triple_tags);
+      if (!is_triple)
+        continue;
+
+      FUloc.setZero();
+      Aloc_r.setZero();
+
+      mesh->getCornerNodesId(&*corner, corner_nodes.data());
+     // mesh->getNodesCoords(corner_nodes.begin(), corner_nodes.end(), x_coefs_r_mid.data());
+
+      dof_handler[DH_UNKS].getVariable(VAR_U).getCornerDofs(mapU_r.data(), &*corner);
+      dof_handler[DH_UNKS].getVariable(VAR_P).getCornerDofs(mapP_r.data(), &*corner);
+      dof_handler[DH_MESH].getVariable(VAR_M).getCornerDofs(mapM_r.data(), &*corner);
+
+      VecGetValues(Vec_x_0,     mapM_r.size(), mapM_r.data(), x_coefs_r_old.data());
+      VecGetValues(Vec_x_1,     mapM_r.size(), mapM_r.data(), x_coefs_r_new.data());
+      VecGetValues(Vec_up_0,    mapU_r.size(), mapU_r.data(), u_coefs_r_old.data());
+      VecGetValues(Vec_uzp_k,    mapU_r.size(), mapU_r.data(), u_coefs_r_new.data());
+
+      u_coefs_r_mid_trans = utheta*u_coefs_r_new.transpose() + (1.-utheta)*u_coefs_r_old.transpose();
+      x_coefs_r_mid_trans = utheta*x_coefs_r_new.transpose() + (1.-utheta)*x_coefs_r_old.transpose();
+
+      //visc = muu(tag);
+      //rho  = pho(Xqp,tag);
+
+      if (dim==3)
+      {
+        // encontrando o ponto da superfície sólido. com ele, é calculado uma normal
+        // que corrigi o sinal de line_normal
+        iCs_end = mesh->edgeStar(corner, iCs, eiCs);
+        if (iCs_end == iCs)
+        {
+          printf("ERROR!: no icell found\n");
+          throw;
+        }
+        gen_error = true;
+        for (iCs_it = iCs; iCs_it != iCs_end ; ++iCs_it)
+        {
+          fluid_cell = mesh->getCellPtr(*iCs_it);
+
+          for (int kk = 0; kk < mesh->numVerticesPerCell(); ++kk)
+          {
+            int const nodekk_id = fluid_cell->getNodeId(kk);
+            Point const* pp      = mesh->getNodePtr(fluid_cell->getNodeId(kk) );
+            const int    tag_aux = pp->getTag();
+
+            if ((is_in(tag_aux, solid_tags) || is_in(tag_aux,feature_tags)) && !is_in(tag_aux, triple_tags))
+            {
+              if (corner_nodes(0) != nodekk_id && corner_nodes(1) != nodekk_id)
+              {
+                gen_error = false;
+                pp->getCoord(solid_point.data(), dim);
+                break;
+              }
+            }
+          }
+          if (gen_error==false)
+            break;
+
+        }
+        if (gen_error)
+        {
+          printf("ERROR!: solid point not found\n");
+          cout << "corner id: " << (mesh->getCellPtr(corner->getIncidCell())->getCornerId(corner->getPosition())) << endl;
+          cout << "first icell : " << (*iCs) << endl;
+          mesh->getNodePtr(corner_nodes(0))->getCoord(point_a.data(),dim);
+          mesh->getNodePtr(corner_nodes(1))->getCoord(point_b.data(),dim);
+          cout << "point a = " << point_a[0] << " " << point_a[1] << " " << point_a[2] << "\n";
+          cout << "point b = " << point_b[0] << " " << point_b[1] << " " << point_b[2] << "\n";
+          cout << "number of cells = " << (iCs_end-iCs) << endl;
+          throw;
+        }
+
+
+        mesh->getNodePtr(corner_nodes(0))->getCoord(point_a.data(),dim);
+        mesh->getNodePtr(corner_nodes(1))->getCoord(point_b.data(),dim);
+
+        // se (a-c) cross (b-c) dot solid_normal > 0, então line_normal_sign = 1, se não, =-1
+        Xqp = (point_a+point_b)/2.;
+        point_a -= solid_point;
+        point_b -= solid_point;
+        normal  = solid_normal(Xqp, current_time, tag);
+        line_normal_sign = point_a(0)*point_b(1)*normal(2) + point_a(1)*point_b(2)*normal(0) + point_a(2)*point_b(0)*normal(1)
+                          -point_a(0)*point_b(2)*normal(1) - point_a(1)*point_b(0)*normal(2) - point_a(2)*point_b(1)*normal(0);
+        if (line_normal_sign>0)
+          line_normal_sign = 1;
+        else
+          line_normal_sign = -1;
+
+
+      }
+      else // dim==2
+      {
+        Point * point = mesh->getNodePtr(corner_nodes[0]);
+        Point * sol_point = NULL;
+        Point * sol_point_2;
+        int iVs[FEPIC_MAX_ICELLS];
+        int *iVs_end, *iVs_it;
+        Vector aux(dim);
+
+        iVs_end = mesh->connectedVtcs(point, iVs);
+
+        // se esse nó está na linha, então existe um vértice vizinho que está no sólido
+        for (iVs_it = iVs; iVs_it != iVs_end ; ++iVs_it)
+        {
+          sol_point_2 = mesh->getNodePtr(*iVs_it);
+          if ( is_in(sol_point_2->getTag(), solid_tags) )
+            if( !sol_point || (sol_point_2->getTag() > sol_point->getTag()) )
+              sol_point = sol_point_2;
+        }
+        if (!sol_point)
+        {
+          //FEP_PRAGMA_OMP(critical)
+          {
+            printf("ERRO: ponto na linha tríplice não tem um vértice vizinho no sólido");
+            throw;
+          }
+        }
+        point->getCoord(Xqp.data(),dim);
+
+        normal = solid_normal(Xqp, current_time, tag);
+
+        sol_point->getCoord(aux.data(),dim);
+
+
+        // choose a line_normal candidate
+        line_normal(0) = -normal(1);
+        line_normal(1) =  normal(0);
+
+        // check orientation
+        if (line_normal.dot(Xqp-aux) < 0)
+          line_normal *= -1;
+      }
+
+
+      for (int qp = 0; qp < n_qpts_corner; ++qp)
+      {
+        if (dim==3)
+        {
+          F_r_mid   = x_coefs_r_mid_trans * dLqsi_r[qp];
+          J_mid = F_r_mid.norm();
+          weight  = quadr_corner->weight(qp);
+          JxW_mid = J_mid*weight;
+        }
+        else
+        {
+          J_mid = 1;
+          weight  = 1;
+          JxW_mid = 1;
+        }
+        //invF_r_mid = F_r_mid.transpose()/(J_mid*J_mid);
+
+
+        Xqp = x_coefs_r_mid_trans * qsi_r[qp]; // coordenada espacial (x,y,z) do ponto de quadratura
+        //dxphi_r = dLphi_r[qp] * invF_r_mid;
+        //dxU_r   = u_coefs_r_mid_trans * dxphi_r; // n+utheta
+        Uqp  = u_coefs_r_mid_trans * phi_r[qp];
+
+        gama_mid = gama(Xqp, current_time+dt*utheta, tag);
+
+        if (dim==3)
+        {
+          normal  = solid_normal(Xqp, current_time, tag);
+          line_normal(0)= F_r_mid(0,0);
+          line_normal(1)= F_r_mid(1,0);
+          line_normal(2)= F_r_mid(2,0);
+          line_normal *= line_normal_sign;
+          line_normal = cross(line_normal, normal);
+          line_normal.normalize();
+        }
+
+        double const Uqp_norm = abs(line_normal.dot(Uqp));
+        for (int i = 0; i < n_dofs_u_per_corner/dim; ++i)
+        {
+          for (int c = 0; c < dim; ++c)
+          {
+            FUloc(i*dim + c) += JxW_mid*(-gama_mid*cos_theta0() + zeta(Uqp_norm,0)*line_normal.dot(Uqp))*line_normal(c)*phi_r[qp][i];
+
+            //FUloc(i*dim + c) += JxW_mid*(-gama_mid*cos_theta0() )*line_normal(c)*phi_r[qp][i];
+            //FUloc(i*dim + c) += JxW_mid*zeta(Uqp_norm,0)*Uqp(c)*phi_r[qp][i];
+
+            for (int j = 0; j < n_dofs_u_per_corner/dim; ++j)
+              for (int d = 0; d < dim; ++d)
+                Aloc_r(i*dim + c, j*dim + d) += JxW_mid* zeta(Uqp_norm,0)*utheta*line_normal(d) *phi_r[qp][j]*line_normal(c)*phi_r[qp][i];
+                //if (c==d)
+                //  Aloc_r(i*dim + c, j*dim + d) += JxW_mid* zeta(Uqp_norm,0) *utheta*phi_r[qp][j]*phi_r[qp][i];
+
+          }
+
+          //FUloc.segment(i*dim, dim) += JxW_mid* phi_r[qp][i] * (-gama_mid*cos_theta0() + zeta(0,0)*line_normal.dot(Uqp))*line_normal;
+        }
+
+
+      } // end quadratura
+
+
+
+
+      // Projection - to force non-penetrarion bc
+      mesh->getCornerNodesId(&*corner, corner_nodes.data());
+      getProjectorMatrix(Prj, nodes_per_corner, corner_nodes.data(), Vec_x_1, current_time+dt, *this);
+
+      FUloc = Prj*FUloc;
+      Aloc_r = Prj*Aloc_r*Prj;
+
+      VecSetValues(Vec_fun_fs, mapU_r.size(), mapU_r.data(), FUloc.data(), ADD_VALUES);
+      MatSetValues(*JJ, mapU_r.size(), mapU_r.data(), mapU_r.size(), mapU_r.data(), Aloc_r.data(),  ADD_VALUES);
+      //cout << FUloc.transpose() << endl;
+
+    }
+
+
+
+  }  //end LINHA DE CONTATO
+#endif
 //#if (false)
   // boundary conditions on global Jacobian
     // solid & triple tags .. force normal

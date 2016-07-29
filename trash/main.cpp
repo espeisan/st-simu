@@ -266,7 +266,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
-  is_bdf3            = PETSC_FALSE;
+  is_bdf3            = PETSC_TRUE;
   is_bdf2            = PETSC_FALSE;
   is_bdf_bdf_extrap  = PETSC_FALSE;
   is_bdf_ab          = PETSC_FALSE;
@@ -1740,6 +1740,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
   printf("initial volume: %.15lf \n", initial_volume);
   current_time = 0;
   time_step = 0;
+  //calcHmean(hme, hmn, hmx);
   double Qmax = 0;
   double steady_error = 1;
   setInitialConditions();  //called only here
@@ -1748,21 +1749,103 @@ PetscErrorCode AppCtx::solveTimeProblem()
   printf("\nNum. of time iterations (maxts): %d\n",maxts);
   printf("Starting time loop ... \n");
 
+  // BDF2
+  if (is_bdf2)
+  {
+    current_time += dt;
+    time_step += 1;
+    VecCopy(Vec_uzp_1, Vec_duzp);
+    VecAXPY(Vec_duzp,-1.0,Vec_uzp_0);
+    VecScale(Vec_duzp, 1./dt);  //duzp=(uzp_1-uzp_0)/dt
+
+    copyVec2Mesh(Vec_x_1);
+    // extrapolation \tilde{X}^{n+1}=2X^{n}-X^{n-1}
+    VecScale(Vec_x_1, 2.0);
+    VecAXPY(Vec_x_1,-1.0,Vec_x_0);
+    copyMesh2Vec(Vec_x_0);
+
+    if (is_bdf_cte_vel)
+    {
+      calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time);
+      VecCopy(Vec_v_1, Vec_x_1);
+      if (is_bdf_extrap_cte) // faz v1 <- 1.5 v1 - 0.5 v0
+      {
+        VecAXPBY(Vec_v_1, -0.5, 1.5, Vec_v_mid);
+        VecCopy(Vec_x_1, Vec_v_mid);
+      }
+      VecScale(Vec_x_1, dt);
+      VecAXPY(Vec_x_1,1.,Vec_x_0); // x_1 += x_0
+    }
+    else if (is_bdf_bdf_extrap)
+    {
+      // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
+      calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
+      VecCopy(Vec_v_1, Vec_x_1);
+      VecScale(Vec_x_1, 2./3.);
+      VecAXPY(Vec_x_1, 1./3.,Vec_v_mid);  //Vec_v_mid = (Vec_x_1-Vec_x_0)/dt (at n-1)
+      VecScale(Vec_x_1, dt);
+      VecAXPY(Vec_x_1,1.,Vec_x_0);
+      if (N_Solids){
+        for (int s = 0; s < N_Solids; s++){
+          for (int l = 0; l < dim; l++){
+            dofs(l) = n_unknowns_u + n_unknowns_p + LZ*(s+1) - LZ + l;
+          }
+          VecGetValues(Vec_uzp_0, dim, dofs.data(), U0.data());
+          VecGetValues(Vec_uzp_1, dim, dofs.data(), U1.data());
+          XG_1[s] = (4./3)*XG_1[s] - (1./3)*XG_0[s] + dt*(2.0*U1 - U0);
+        }
+        XG_0 = XG_1;
+      }
+
+    }
+    else if (is_bdf_ab)
+    {
+      // calcula o X meio extrapolado
+      VecAXPY(Vec_x_1,1.0,Vec_x_0);
+      VecScale(Vec_x_1, .5);
+      // computa a velocidade nesse X meio
+      calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time);
+      VecCopy(Vec_v_1, Vec_x_1);
+      VecScale(Vec_x_1, dt);
+      VecAXPY(Vec_x_1,1.,Vec_x_0);
+      // coloca V1 no passo inteiro
+      VecScale(Vec_v_1, 1.5);
+      VecAXPY(Vec_v_1,-.5,Vec_v_mid);
+    }
+    else
+    {
+      calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
+
+      VecCopy(Vec_v_1, Vec_x_1);
+      //VecScale(Vec_x_1, 2./3.);
+      //VecAXPY(Vec_x_1, 1./3.,Vec_v_mid);
+      VecScale(Vec_x_1, 1./2.);
+      VecAXPY(Vec_x_1, 1./2.,Vec_v_mid); // Computes Vec_x_1 = alpha Vec_v_mid + Vec_x_1
+      VecScale(Vec_x_1, dt);
+      VecAXPY(Vec_x_1,1.,Vec_x_0);
+    }
+
+    VecCopy(Vec_uzp_1, Vec_uzp_0);
+    cout << "inside BDF2 main 1953" << endl;
+  }//end if BDF2
+
   //print solid's center information
-  ofstream filg, filv;
-  Vector3d Xgg;
-  VectorXd v_coeffs_s(LZ*N_Solids);
-  VectorXi mapvs(LZ*N_Solids);
-  //int TT = 0;
-  char gravc[PETSC_MAX_PATH_LEN], velc[PETSC_MAX_PATH_LEN];
-  sprintf(gravc,"%s/HistGrav.txt",filehist_out.c_str());
-  sprintf(velc,"%s/HistVel.txt",filehist_out.c_str());
-  if (fprint_hgv){
-    filg.open(gravc);
-    filv.open(velc);
-    filg.close();
-    filv.close();
-  }
+//  if (fprint_hgv){
+    ofstream filg, filv;
+    Vector3d Xgg;
+    VectorXd v_coeffs_s(LZ*N_Solids);
+    VectorXi mapvs(LZ*N_Solids);
+    //int TT = 0;
+    char gravc[PETSC_MAX_PATH_LEN], velc[PETSC_MAX_PATH_LEN];
+    sprintf(gravc,"%s/HistGrav.txt",filehist_out.c_str());
+    sprintf(velc,"%s/HistVel.txt",filehist_out.c_str());
+    if (fprint_hgv){
+      filg.open(gravc);
+      filv.open(velc);
+      filg.close();
+      filv.close();
+    }
+  //  }
 
   for(;;)  // equivalent to forever or while(true), must be a break inside
   {
@@ -1772,6 +1855,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
     cout << "time step: "    << time_step  << endl;
     cout << "steady error: " << steady_error << endl;
 
+    //mesh->getNodePtr(0)->getCoord(X.data(), dim);
+    //Xe(0) = 1.0*exp(sin(pi*current_time)/pi);
+    //Xe(1) = 0;
+    //x_error += (X-Xe).norm()/maxts;
+
     if (maxts == 0)
     {
       computeError(Vec_x_0, Vec_uzp_0,current_time);
@@ -1780,6 +1868,9 @@ PetscErrorCode AppCtx::solveTimeProblem()
 
     bool const full_implicit = false;
     bool const try2 = false; // extrapolate geometry Vec_x_1 <- 2*Vec_x_1 - Vec_x_0
+
+    // BDF2
+
 
     // * SOLVE THE SYSTEM *
     if (solve_the_sys)
@@ -1821,18 +1912,81 @@ PetscErrorCode AppCtx::solveTimeProblem()
       //View(Vec_uzp_0, buf1, buf2);
       //sprintf(buf1,"matrizes/mal%d.m",time_step); sprintf(buf2,"malm%d",time_step);
       //View(Vec_x_0, buf1, buf2);  //TT++;
-
       for (int kk = 0 ; kk < 1+3*full_implicit; kk++)
       {
         printf("\tFixed Point Iteration %d\n", kk);
 
         ierr = SNESSolve(snes_fs,PETSC_NULL,Vec_uzp_1);        CHKERRQ(ierr);
         if (N_Solids){updateSolidVel();}
-      }
 
+        //if (is_bdf3){XG_aux = XG_0;}
+        //XG_0 = XG_1;
+
+        // update
+        if (full_implicit)
+        {
+          //double tt = time_step==0? dt : current_time;
+          //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
+//          calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 0.5, Vec_v_mid, current_time); // Adams-Bashforth
+          // move the mesh
+          VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
+
+          //compute normal for the next time step, at n+1/2
+          {
+            Vec Vec_x_mid;
+            int xsize;
+            double *xarray;
+            VecGetSize(Vec_x_0, &xsize);
+//            VecGetArray(Vec_res, &xarray);
+            //prototipo no petsc-dev: VecCreateSeqWithArray(MPI_Comm comm,PetscInt bs,PetscInt n,const PetscScalar array[],Vec *V)
+            //VecCreateSeqWithArray(MPI_COMM_SELF, xsize, xarray, &Vec_x_mid);
+            VecCreateSeqWithArray(MPI_COMM_SELF, 1, xsize, xarray, &Vec_x_mid);
+            Assembly(Vec_x_mid);
+
+            VecCopy(Vec_x_0, Vec_x_mid);
+            VecAXPY(Vec_x_mid,1.,Vec_x_1);
+            VecScale(Vec_x_mid, 0.5);
+            getVecNormals(&Vec_x_mid, Vec_normal);
+
+            VecDestroy(&Vec_x_mid);
+//            VecRestoreArray(Vec_res, &xarray);
+          }
+
+          //// initial guess for the next time step; u(n+1) = 2*u(n) - u(n-1)
+          //VecCopy(Vec_up_1, Vec_res);
+          //VecScale(Vec_res,2.);
+          //VecAXPY(Vec_res, -1., Vec_up_0);
+          //VecCopy(Vec_res, Vec_up_1); // u(n+1) = 2*u(n) - u(n-1)
+
+        }//end if full_implicit
+
+//        forceDirichlet();
+
+      }
     } // end if (solve_the_system)
 
-    if (is_bdf3)
+    if (is_bdf2)
+    {
+      if (plot_exact_sol)
+        computeError(Vec_x_0, Vec_uzp_0,current_time);
+      VecCopy(Vec_uzp_1, Vec_duzp);
+      VecAXPY(Vec_duzp,-1.0,Vec_uzp_0); // Vec_dup -= Vec_up_0
+      VecScale(Vec_duzp, 1./dt);
+
+      if (is_bdf_ab)
+      {
+        // atualizando Vec_v_mid para V1 meio (lembrando que Vec_v_1 tinha sido extrapolado p/ inteiro)
+        VecScale(Vec_v_mid, 1./3.);
+        VecAXPY(Vec_v_mid,2./3.,Vec_v_1); // Vec_v_mid -= Vec_x_0
+      }
+      else
+      {
+        VecCopy(Vec_x_1, Vec_v_mid);
+        VecAXPY(Vec_v_mid,-1.0,Vec_x_0); // Vec_v_mid -= Vec_x_0
+        VecScale(Vec_v_mid, 1./dt);
+      }
+    }
+    else if (is_bdf3)
     {
       if (plot_exact_sol)
         computeError(Vec_x_0, Vec_uzp_0,current_time);
@@ -1849,7 +2003,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
       //VecAXPY(Vec_v_mid,-1.0,Vec_x_0); // Vec_v_mid -= Vec_x_0
       //VecScale(Vec_v_mid, 1./dt);
     }
-    else  //for MR-AB, modifies P from Vec_uzp_0
+    else
     {
       if (time_step == 0)
       {
@@ -1904,7 +2058,9 @@ PetscErrorCode AppCtx::solveTimeProblem()
         else
           vtk_printer.addCellScalarVtk("pressure", GetDataPressCellVersion(q_array, *this));
 
+
         vtk_printer.addCellIntVtk("cell_tag", GetDataCellTag(*this));
+
 
         //vtk_printer.printPointTagVtk("point_tag");
         VecRestoreArray(Vec_uzp_0, &q_array);  //VecRestoreArray(Vec_up_0, &q_array);
@@ -1926,7 +2082,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
     // update
     if (ale)
     {
-      // mesh adaption (it has topological changes) (2d only) it destroys Vec_normal and Vec_v_mid
+      //double tt = time_step==0? dt : current_time;
+
+      // mesh adaption (it has topological changes) (2d only)
+      // it destroys Vec_normal and Vec_v_mid
+      //if(time_step == 1 || time_step == 3)
       if (mesh_adapt)
         meshAdapt_s(); //meshAdapt()_l;
 
@@ -1961,7 +2121,16 @@ PetscErrorCode AppCtx::solveTimeProblem()
         } // end ts%1
       } // end mesh adapt
 
-      if (is_bdf3)
+      if (full_implicit)
+        VecCopy(Vec_x_1, Vec_x_0);
+      else if (try2)
+      {
+        VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0);
+        copyVec2Mesh(Vec_x_1);
+        VecAXPBY(Vec_x_1,-1.0, 2.0,Vec_x_0); // Vec_x_1 <- 2*Vec_x_1 - Vec_x_0
+        copyMesh2Vec(Vec_x_0);
+      }
+      else if (is_bdf3)
       {
         // extrapolation of Vec_x_1, \bar{X^{n+1}} = 3X^{n}-3X^{n-1}+\bar{X^{n-2}}
         VecScale(Vec_x_1, 3.0);
@@ -1999,27 +2168,72 @@ PetscErrorCode AppCtx::solveTimeProblem()
             XG_aux[s] = XG_0[s];
             XG_0[s]   = XG_temp;
           }
+          //XG_aux = XG_0;
         }
         // the VecCopy(Vec_uzp_1, Vec_uzp_0) and XG_0 = XG_1 are done after the end if ale
       }
-      else  //for MR-AB
+      else
       {
-        // extrapolated geometry
-        //VecScale(Vec_x_1, 2.0);
-        //VecAXPY(Vec_x_1,-1.0,Vec_x_0);  // \bar{X}^(n+1/2)=2.0*X^(n)-1.0X^(n-1)
-        VecScale(Vec_x_1, 1.5);
-        VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
+        VecScale(Vec_x_1, 2.0);
+        VecAXPY(Vec_x_1,-1.0,Vec_x_0);  //extrapolated geometry \bar{X}^(n+1/2)=2*X^(n)-X^(n-1)
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
-        calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
-        VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
-        if (N_Solids){moveCenterMass(1.5);}
       }
 
-/*
+
       if ( !full_implicit && !is_bdf3 )
       {
+        if (is_bdf2)
         {
+          if (is_bdf_cte_vel)
+          {
+            //VecCopy(Vec_v_1, Vec_v_mid);
+            if (is_bdf_extrap_cte) // faz v1 <- 1.5 v1 - 0.5 v0
+            {
+              calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time);
+              VecCopy(Vec_v_1, Vec_x_1); // estraga x1, eh consertado depois
+              VecAXPBY(Vec_v_1, -0.5, 1.5, Vec_v_mid);
+              VecCopy(Vec_x_1, Vec_v_mid);
+            }
+            else
+            {
+              calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time);
+              VecCopy(Vec_v_1, Vec_v_mid);
+            }
+          }
+          else if (is_bdf_bdf_extrap)
+          {
+            calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
+            VecCopy(Vec_v_1, Vec_x_1);
+            VecScale(Vec_x_1, 2./3.);
+            VecAXPY(Vec_x_1, 1./3.,Vec_v_mid);
+            VecScale(Vec_x_1, dt);
+            VecAXPY(Vec_x_1,1.,Vec_x_0);
+          }
+          else if (is_bdf_ab)
+          {
+            // calcula o X meio extrapolado
+            VecAXPY(Vec_x_1,1.0,Vec_x_0);
+            VecScale(Vec_x_1, .5);
+            // computa a velocidade nesse X meio
+            calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time);
+            VecCopy(Vec_v_1, Vec_x_1);
+            VecScale(Vec_x_1, dt);
+            VecAXPY(Vec_x_1,1.,Vec_x_0);
+
+            // coloca V1 no passo inteiro
+            VecScale(Vec_v_1, 1.5);
+            VecAXPY(Vec_v_1,-.5,Vec_v_mid);
+          }
+          else
+          {
+            VecCopy(Vec_v_1, Vec_v_mid);
+            calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
+            VecAXPBY(Vec_v_mid, .5, .5, Vec_v_1); //  y = alpha x + beta y.
+          }
+        }
+        else{
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
+        //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler
         }
         // move the mesh
         if (!try2 && !is_bdf_bdf_extrap && !is_bdf_ab){
@@ -2027,7 +2241,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
           moveCenterMass(1.5);
         }
       }//end !full_implicit && !is_bdf3
-*/
+
 
       //compute normal for the next time step, at n+1/2
       {
@@ -2051,7 +2265,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
       }
 
       VecCopy(Vec_uzp_1, Vec_uzp_0); //VecCopy(Vec_up_1, Vec_up_0);
-
+      //if (N_Solids) {XG_0 = XG_1;}
     }//end if ale
     else // if it's not ALE
     {
@@ -2813,30 +3027,17 @@ PetscErrorCode AppCtx::updateSolidVel()
 
 PetscErrorCode AppCtx::moveCenterMass(double vtheta)
 {
-  VectorXi    dofs(dim);
-  Vector      U0(dim), U1(dim), tmp(Vector::Zero(3)), XG_temp(3);
+  VectorXi    node_dofs(dim);
+  Vector      U0(dim), U1(dim), tmp(Vector::Zero(3));
 
   for (int s = 0; s < N_Solids; s++){
-
     for (int l = 0; l < dim; l++){
-      dofs(l) = n_unknowns_u + n_unknowns_p + LZ*(s+1) - LZ + l;
+      node_dofs(l) = n_unknowns_u + n_unknowns_p + LZ*(s+1) - LZ + l;
     }
-    VecGetValues(Vec_uzp_0, dim, dofs.data(), U0.data());
-    VecGetValues(Vec_uzp_1, dim, dofs.data(), U1.data());
-
-    if (is_bdf3){
-      XG_temp   = XG_1[s];
-      XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*U0;
-      XG_aux[s] = XG_0[s];
-      XG_0[s]   = XG_temp;
-    }
-    else{  //for MR-AB
-      for (int l = 0; l < dim; l++){tmp(l) = vtheta*U1(l) + (1.-vtheta)*U0(l);}
-      XG_temp = XG_1[s];
-      XG_1[s] = dt*tmp + XG_0[s];
-      XG_0[s] = XG_temp;
-    }
-
+    VecGetValues(Vec_uzp_0, dim, node_dofs.data(), U0.data());
+    VecGetValues(Vec_uzp_1, dim, node_dofs.data(), U1.data());
+    for (int l = 0; l < dim; l++){tmp(l) = vtheta*U1(l) + (1.-vtheta)*U0(l);}
+    XG_1[s] = dt*tmp + XG_0[s];
   }
   PetscFunctionReturn(0);
 }
