@@ -268,8 +268,8 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
 
   is_bdf3            = PETSC_TRUE;
   is_bdf2            = PETSC_FALSE;
-  is_bdf_bdf_extrap  = PETSC_FALSE;
-  is_bdf_ab          = PETSC_FALSE;
+  is_bdf2_bdfe       = PETSC_FALSE;
+  is_bdf2_ab         = PETSC_FALSE;
   is_bdf_cte_vel     = PETSC_FALSE;
   is_bdf_euler_start = PETSC_FALSE;
   is_bdf_extrap_cte  = PETSC_FALSE;
@@ -283,12 +283,12 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
     cout << "ERROR: is_bdf_extrap_cte && !is_bdf_cte_vel" << endl;
     throw;
   }
-  if (is_bdf_bdf_extrap && !is_bdf2)
+  if (is_bdf2_bdfe && !is_bdf2)
   {
     cout << "ERROR: !is_bdf_bdf_extrap && !is_bdf2" << endl;
     throw;
   }
-  if (is_bdf_ab && !is_bdf2)
+  if (is_bdf2_ab && !is_bdf2)
   {
     cout << "ERROR: !is_bdf_ab && !is_bdf2" << endl;
     throw;
@@ -1540,7 +1540,7 @@ PetscErrorCode AppCtx::setInitialConditions()
         {
           // saving uzp n-1 and n-2
           //VecCopy(Vec_uzp_1,Vec_uzp_m1);
-          //-----
+          ////-----
           VecCopy(Vec_uzp_0,Vec_uzp_m2);
           /*///-----
           VecCopy(Vec_uzp_1, Vec_duzp_0);
@@ -1552,17 +1552,23 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecCopy(Vec_x_1, Vec_x_0);
           if (N_Solids) {XG_aux = XG_0; XG_0 = XG_1;}
           VecCopy(Vec_uzp_1, Vec_uzp_0);
+          //View(Vec_uzp_0,"matrizes/uzp_0.m","uzp0");
+          //View(Vec_duzp_0,"matrizes/duzp_0.m","duzp0");
+          //View(Vec_uzp_m2,"matrizes/uzp_m2.m","uzpm2");
         }
         else
         {
-          //-----
+          ////-----
           VecCopy(Vec_uzp_0,Vec_uzp_m1);
           /*///-----
           VecCopy(Vec_uzp_1, Vec_duzp);
           VecAXPY(Vec_duzp,-1.0,Vec_uzp_0);
-          VecScale(Vec_duzp, 1./dt);  //duzp_0=(uzp_1-uzp_0)/dt
+          VecScale(Vec_duzp, 1./dt);  //duzp=(uzp_1-uzp_0)/dt
           /*///-----
           copyVec2Mesh(Vec_x_1);
+          //View(Vec_uzp_1,"matrizes/uzp_1.m","uzp1");
+          //View(Vec_duzp,"matrizes/duzp_1.m","duzp");
+          //View(Vec_uzp_m1,"matrizes/uzp_m1.m","uzpm1");
 
           // solving geometry before the (u,p)
           // extrapolation of Vec_x_1, \bar{X^{n+1}} = 3X^{n}-3X^{n-1}+\bar{X^{n-2}}
@@ -1571,18 +1577,18 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecAXPY(Vec_x_1, 1.0,Vec_x_aux);
           // copyMesh2Vec(Vec_x_0); // we need Vec_x_0 later, don't touch it
           // estraga Vec_uzp_0, usado porque não se precisa mais
-          //-----
+          ////-----
           VecScale(Vec_uzp_0,-3.0);
           VecAXPY(Vec_uzp_0,3.0,Vec_uzp_1);
           VecAXPY(Vec_uzp_0,1.0,Vec_uzp_m2);
-          //View(Vec_uzp_0,"matrizes/vuzp_0m.m","vuzpm_0m");
+          //View(Vec_uzp_0,"matrizes/uzp_0.m","uzp0");
           /*///-----
           VecCopy(Vec_duzp, Vec_uzp_0);
           VecScale(Vec_uzp_0, 2.0);
           VecAXPY(Vec_uzp_0,-1.0,Vec_duzp_0);
           VecScale(Vec_uzp_0, dt);
           VecAXPY(Vec_uzp_0, 1.0,Vec_uzp_1); // Vec_up_0 tem agora a extrapolacao do futuro Vec_up_1
-          View(Vec_uzp_0,"matrizes/vuzp_0o.m","vuzpm_0o");
+          //View(Vec_uzp_0,"matrizes/uzp_0o.m","uzp0o");
           /*///-----
 
           // calc V^{n+1} and update with D_{3}X^{n+1} = dt*V^{n+1}
@@ -1733,6 +1739,34 @@ PetscErrorCode AppCtx::solveTimeProblem()
   printf("\nNum. of time iterations (maxts): %d\n",maxts);
   printf("Starting time loop ... \n");
 
+  if (is_bdf2)
+  {
+    current_time += dt;
+    time_step += 1;
+
+    VecCopy(Vec_uzp_0,Vec_uzp_m1);
+    copyVec2Mesh(Vec_x_1);
+
+    if (is_bdf2_bdfe)
+    {
+      // extrapolation \tilde{X}^{n+1}=2X^{n}-X^{n-1}
+      VecScale(Vec_x_1, 2.0);
+      VecAXPY(Vec_x_1,-1.0,Vec_x_0);
+      //copyMesh2Vec(Vec_x_0);
+      // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
+      calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
+      VecCopy(Vec_v_1, Vec_x_1);
+      VecScale(Vec_x_1, 2./3.*dt);
+      VecAXPY(Vec_x_1,-1./3.,Vec_x_0);
+      copyMesh2Vec(Vec_x_0);
+      VecAXPY(Vec_x_1,4./3.,Vec_x_0);
+      if (N_Solids){moveCenterMass(2.0);}
+      VecCopy(Vec_v_1,Vec_v_mid);
+    }
+
+    VecCopy(Vec_uzp_1, Vec_uzp_0);
+  }
+
   //print solid's center information
   ofstream filg, filv;
   Vector3d Xgg;
@@ -1821,7 +1855,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
     {
       if (plot_exact_sol)
         computeError(Vec_x_0, Vec_uzp_0,current_time);
-      //-----
+      ////-----
       VecCopy(Vec_uzp_m1,Vec_uzp_m2);
       VecCopy(Vec_uzp_0,Vec_uzp_m1);
       /*///-----
@@ -1951,7 +1985,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
         VecAXPY(Vec_x_1, 1.0,Vec_x_aux);
         // copyMesh2Vec(Vec_x_0); // we need Vec_x_0 later, don't touch it
         // estraga Vec_up_0, usado porque não se precisa mais
-        //-----
+        ////-----
         VecScale(Vec_uzp_0,-3.0);
         VecAXPY(Vec_uzp_0,3.0,Vec_uzp_1);
         VecAXPY(Vec_uzp_0,1.0,Vec_uzp_m2);
@@ -2801,6 +2835,16 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
       XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*U0;
       XG_aux[s] = XG_0[s];
       XG_0[s]   = XG_temp;
+    }
+    else if (is_bdf2){
+      if (is_bdf2_bdfe){
+        XG_temp = XG_1[s];
+        XG_1[s] = (4./3.)*XG_1[s] - (1./3.)*XG_0[s] + (2./3.)*dt*(vtheta*U1 + (1.-vtheta)*U0);
+        XG_0[s] = XG_temp;
+      }
+      else if (is_bdf2_ab){
+        cout << "do" << endl;
+      }
     }
     else{  //for MR-AB
       XG_temp = XG_1[s];
