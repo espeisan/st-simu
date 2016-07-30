@@ -266,9 +266,9 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
-  is_bdf3            = PETSC_TRUE;
-  is_bdf2            = PETSC_FALSE;
-  is_bdf2_bdfe       = PETSC_FALSE;
+  is_bdf3            = PETSC_FALSE;
+  is_bdf2            = PETSC_TRUE;
+  is_bdf2_bdfe       = PETSC_TRUE;
   is_bdf2_ab         = PETSC_FALSE;
   is_bdf_cte_vel     = PETSC_FALSE;
   is_bdf_euler_start = PETSC_FALSE;
@@ -1851,7 +1851,14 @@ PetscErrorCode AppCtx::solveTimeProblem()
 
     } // end if (solve_the_system)
 
-    if (is_bdf3)
+    if (is_bdf2)
+    {
+      if (plot_exact_sol)
+        computeError(Vec_x_0, Vec_uzp_0,current_time);
+
+      VecCopy(Vec_uzp_0,Vec_uzp_m1);
+    }
+    else if (is_bdf3)
     {
       if (plot_exact_sol)
         computeError(Vec_x_0, Vec_uzp_0,current_time);
@@ -1977,7 +1984,25 @@ PetscErrorCode AppCtx::solveTimeProblem()
         } // end ts%1
       } // end mesh adapt
 
-      if (is_bdf3)
+      if (is_bdf2)
+      {
+        if (is_bdf2_bdfe)
+        {
+          // extrapolation \tilde{X}^{n+1}=2X^{n}-X^{n-1}
+          VecScale(Vec_x_1, 2.0);
+          VecAXPY(Vec_x_1,-1.0,Vec_x_0);
+          // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
+          calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
+          VecCopy(Vec_v_1, Vec_x_1);
+          VecScale(Vec_x_1, 2./3.*dt);
+          VecAXPY(Vec_x_1,-1./3.,Vec_x_0);
+          copyMesh2Vec(Vec_x_0);
+          VecAXPY(Vec_x_1,4./3.,Vec_x_0);
+          if (N_Solids){moveCenterMass(2.0);}
+          VecCopy(Vec_v_1,Vec_v_mid);
+        }
+      }
+      else if (is_bdf3)
       {
         // extrapolation of Vec_x_1, \bar{X^{n+1}} = 3X^{n}-3X^{n-1}+\bar{X^{n-2}}
         VecScale(Vec_x_1, 3.0);
@@ -2036,7 +2061,6 @@ PetscErrorCode AppCtx::solveTimeProblem()
         }
       }//end !full_implicit && !is_bdf3
 */
-
       //compute normal for the next time step, at n+1/2
       {
         Vec Vec_x_mid;

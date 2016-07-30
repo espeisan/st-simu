@@ -582,7 +582,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     VectorXd          FZloc(nodes_per_cell*LZ);
 
     /* local data */
-    int                 tag, tag_c, nod_id, nod_is, idd = 0, *iddd;
+    int                 tag, tag_c, nod_id, nod_is;
     MatrixXd            u_coefs_c_mid_trans(dim, n_dofs_u_per_cell/dim);  // n+utheta  // trans = transpost
     MatrixXd            u_coefs_c_old(n_dofs_u_per_cell/dim, dim);        // n
     MatrixXd            u_coefs_c_old_trans(dim,n_dofs_u_per_cell/dim);   // n
@@ -992,9 +992,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         if (is_bdf2 && time_step > 0)
         {
           Uqp_m1 = u_coefs_c_om1_trans * phi_c[qp];
-
-          dUqp_old  = du_coefs_c_old_trans * phi_c[qp]; //n+utheta
-          dUdt = 1.5*dUdt - .5*dUqp_old; //D2f^{n+1}/dt = 1.5D1f^{n+1}/dt-.5(U^{n}-U^{n-1})/dt
+          dUdt = 1.5*dUdt - 1./2.*Uqp_old/dt + 1./2.*Uqp_m1/dt;
+          //dUqp_old  = du_coefs_c_old_trans * phi_c[qp]; //n+utheta
+          //dUdt = 1.5*dUdt - .5*dUqp_old; //D2f^{n+1}/dt = 1.5D1f^{n+1}/dt-.5(U^{n}-U^{n-1})/dt
         }
         else if (is_bdf3 && time_step > 1)
         {
@@ -1015,7 +1015,10 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         Zqp = Vector::Zero(dim);
 
         if (SFI){
-          if (is_bdf3 && time_step > 1){
+          if (is_bdf2 && time_step > 0){
+            Uqp_m1 = u_coefs_c_om1c_trans * phi_c[qp];
+          }
+          else if (is_bdf3 && time_step > 1){
             //u_coefs_c_om1 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
             //VecGetValues(Vec_uzp_m1,  mapU_t.size(), mapU_t.data(), u_coefs_c_om1.data()); // bdf2,bdf3
             //u_coefs_c_om1_trans = u_coefs_c_om1.transpose();
@@ -1047,7 +1050,10 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           dxU      += dxZ;                    //cout << dxU << endl;
           Uconv_qp += Zqp;
           dUdt     += (Zqp_new-Zqp_old)/dt;
-          if (is_bdf3 && time_step > 1){
+          if (is_bdf2 && time_step > 0){
+            dUdt += 1./2.*Zqp_new/dt - 1.*Zqp_old/dt + 1./2.*Uqp_m1/dt;
+          }
+          else if (is_bdf3 && time_step > 1){
             dUdt += 5./6.*Zqp_new/dt - 2.*Zqp_old/dt + 3./2.*Uqp_m1/dt - 1./3.*Uqp_m2/dt;
           }
         }
@@ -1642,13 +1648,14 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       VecGetValues(Vec_uzp_k ,   mapZ_s.size(), mapZ_s.data(), z_coefs_new.data());  //cout << z_coefs_new.transpose() << endl;
       VecGetValues(Vec_uzp_m1,   mapZ_s.size(), mapZ_s.data(), z_coefs_om1.data()); // bdf2,bdf3
       if (is_bdf3){
-        VecGetValues(Vec_uzp_m2, mapZ_s.size(), mapZ_s.data(), z_coefs_om2.data()); // bdf2,bdf3
+        VecGetValues(Vec_uzp_m2, mapZ_s.size(), mapZ_s.data(), z_coefs_om2.data()); // bdf2
       }
+
       dZdt = (z_coefs_new - z_coefs_old)/dt;
       if (is_bdf2 && time_step > 0){
-        cout << endl;
+        dZdt = 3./2.*dZdt - 1./2.*z_coefs_old/dt + 1./2.*z_coefs_om1/dt;
       }
-      if (is_bdf3 && time_step > 1){
+      else if (is_bdf3 && time_step > 1){
         dZdt = 11./6.*dZdt - 7./6.*z_coefs_old/dt + 3./2.*z_coefs_om1/dt - 1./3.*z_coefs_om2/dt;
       }
       MI = MI_tensor(MV[K],RV[K],dim);
