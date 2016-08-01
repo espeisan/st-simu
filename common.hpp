@@ -487,6 +487,7 @@ public:
   PetscBool   fprint_ca, fprint_hgv; // print contact angle, gravity velocity solid
   PetscBool   nonlinear_elasticity;
   PetscBool   mesh_adapt;
+  PetscBool   is_mr_ab;
   PetscBool   is_bdf3;
   PetscBool   is_bdf2;
   PetscBool   is_bdf2_bdfe;
@@ -494,6 +495,7 @@ public:
   PetscBool   is_bdf_cte_vel;
   PetscBool   is_bdf_euler_start;
   PetscBool   is_bdf_extrap_cte;
+  PetscBool   is_basic;
   
   int         converged_times;
   double      dt;

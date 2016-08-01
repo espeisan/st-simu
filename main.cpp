@@ -266,13 +266,16 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
+  is_mr_ab           = PETSC_FALSE;
   is_bdf3            = PETSC_FALSE;
-  is_bdf2            = PETSC_TRUE;
-  is_bdf2_bdfe       = PETSC_TRUE;
+  is_bdf2            = PETSC_FALSE;
+  is_bdf2_bdfe       = PETSC_FALSE;
   is_bdf2_ab         = PETSC_FALSE;
   is_bdf_cte_vel     = PETSC_FALSE;
   is_bdf_euler_start = PETSC_FALSE;
   is_bdf_extrap_cte  = PETSC_FALSE;
+  is_basic           = PETSC_TRUE;
+
   if ((is_bdf2 && utheta!=1) || (is_bdf3 && utheta!=1))
   {
     cout << "ERROR: BDF2/3 with utheta!=1" << endl;
@@ -1481,6 +1484,11 @@ PetscErrorCode AppCtx::setInitialConditions()
   //VecView(Vec_v_mid,PETSC_VIEWER_STDOUT_WORLD); //VecView(Vec_x_0,PETSC_VIEWER_STDOUT_WORLD); VecView(Vec_x_1,PETSC_VIEWER_STDOUT_WORLD);
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
 
+  if (is_basic){
+    if (N_Solids){moveCenterMass(0.0);}
+    PetscFunctionReturn(0);
+  }
+
   if (ale)
   {
     printf("Initial conditions:\n");
@@ -1676,11 +1684,12 @@ PetscErrorCode AppCtx::setUPInitialGuess()
 {
   // set U^{n+1} b.c.
 
-  VectorXi    u_dofs_fs(dim);
+  VectorXi    u_dofs_fs(dim), p_dofs(dim);
   VectorXi    x_dofs(dim);
   int         tag;
   Vector      X1(dim);
   Vector      U1(dim);
+  bool        already = false;
 
   point_iterator point = mesh->pointBegin();
   point_iterator point_end = mesh->pointEnd();
@@ -1697,6 +1706,13 @@ PetscErrorCode AppCtx::setUPInitialGuess()
     {
       U1 = u_exact(X1, current_time+dt, tag);  //current_time+dt 'cause we want U^{n+1}
       VecSetValues(Vec_uzp_1, dim, u_dofs_fs.data(), U1.data(), INSERT_VALUES);
+
+      if (already){
+        getNodeDofs(&*point,DH_UNKM,VAR_P,p_dofs.data());
+        double p_in = 0.0;
+        VecSetValues(Vec_uzp_1, 1, p_dofs.data(), &p_in, INSERT_VALUES);
+        already = false;
+      }
     }
     else
     if (is_in(tag, solid_tags) || is_in(tag, feature_tags) || is_in(tag, triple_tags))
@@ -1752,7 +1768,6 @@ PetscErrorCode AppCtx::solveTimeProblem()
       // extrapolation \tilde{X}^{n+1}=2X^{n}-X^{n-1}
       VecScale(Vec_x_1, 2.0);
       VecAXPY(Vec_x_1,-1.0,Vec_x_0);
-      //copyMesh2Vec(Vec_x_0);
       // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
       calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
       VecCopy(Vec_v_1, Vec_x_1);
@@ -1762,6 +1777,23 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecAXPY(Vec_x_1,4./3.,Vec_x_0);
       if (N_Solids){moveCenterMass(2.0);}
       VecCopy(Vec_v_1,Vec_v_mid);
+    }
+    else if (is_bdf2_ab)
+    {
+      // extrapolated geometry
+      //VecScale(Vec_x_1, 2.0);
+      //VecAXPY(Vec_x_1,-1.0,Vec_x_0);  // \bar{X}^(n+1/2)=2.0*X^(n)-1.0X^(n-1)
+      VecScale(Vec_x_1, 1.5);
+      VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
+      copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+      calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
+      VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
+      if (N_Solids){moveCenterMass(1.5);}
+      // velocity at integer step
+      //VecScale(Vec_v_1, 1.5);
+      //VecAXPY(Vec_v_1,-.5,Vec_v_mid);
+      VecScale(Vec_v_1, 2.0);
+      VecAXPY(Vec_v_1,-1.0,Vec_v_mid);
     }
 
     VecCopy(Vec_uzp_1, Vec_uzp_0);
@@ -1798,13 +1830,13 @@ PetscErrorCode AppCtx::solveTimeProblem()
     }
 
     bool const full_implicit = false;
-    bool const try2 = false; // extrapolate geometry Vec_x_1 <- 2*Vec_x_1 - Vec_x_0
+    //bool const try2 = false; // extrapolate geometry Vec_x_1 <- 2*Vec_x_1 - Vec_x_0
 
     // * SOLVE THE SYSTEM *
     if (solve_the_sys)
     {
 
-      setUPInitialGuess();  //setup Vec_up_1 for SNESSolve
+      setUPInitialGuess();  //setup Vec_uzp_1 for SNESSolve
 
       if (fprint_hgv){
         if ((time_step%print_step)==0 || time_step == (maxts-1)){
@@ -1857,6 +1889,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
         computeError(Vec_x_0, Vec_uzp_0,current_time);
 
       VecCopy(Vec_uzp_0,Vec_uzp_m1);
+      if (is_bdf2_ab)
+        VecCopy(Vec_v_1,Vec_v_mid);
     }
     else if (is_bdf3)
     {
@@ -1872,7 +1906,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecScale(Vec_duzp, 1./dt);
       /*///-----
     }
-    else  //for MR-AB, modifies P from Vec_uzp_0
+    else if (is_mr_ab) //for MR-AB, modifies P from Vec_uzp_0
     {
       if (time_step == 0)
       {
@@ -2001,6 +2035,24 @@ PetscErrorCode AppCtx::solveTimeProblem()
           if (N_Solids){moveCenterMass(2.0);}
           VecCopy(Vec_v_1,Vec_v_mid);
         }
+        else if (is_bdf2_ab)
+        {
+          // extrapolated geometry
+          //VecScale(Vec_x_1, 2.0);
+          //VecAXPY(Vec_x_1,-1.0,Vec_x_0);  // \bar{X}^(n+1/2)=2.0*X^(n)-1.0X^(n-1)
+          VecScale(Vec_x_1, 1.5);
+          VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
+          copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+          calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
+          VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
+          if (N_Solids){moveCenterMass(1.5);}
+          // velocity at integer step
+          //VecScale(Vec_v_1, 1.5);
+          //VecAXPY(Vec_v_1,-.5,Vec_v_mid);
+          VecScale(Vec_v_1, 2.0);
+          VecAXPY(Vec_v_1,-1.0,Vec_v_mid);
+
+        }
       }
       else if (is_bdf3)
       {
@@ -2035,17 +2087,25 @@ PetscErrorCode AppCtx::solveTimeProblem()
         // VecCopy(Vec_uzp_1, Vec_uzp_0) is done after the end if ale
         VecCopy(Vec_v_1,Vec_v_mid);
       }
-      else  //for MR-AB
+      else if (is_mr_ab) //for MR-AB
       {
         // extrapolated geometry
-        //VecScale(Vec_x_1, 2.0);
-        //VecAXPY(Vec_x_1,-1.0,Vec_x_0);  // \bar{X}^(n+1/2)=2.0*X^(n)-1.0X^(n-1)
-        VecScale(Vec_x_1, 1.5);
-        VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
+        VecScale(Vec_x_1, 2.0);         // look inside residue why this extrap is used
+        VecAXPY(Vec_x_1,-1.0,Vec_x_0);  // \bar{X}^(n+1/2)=2.0*X^(n)-1.0X^(n-1)
+        //VecScale(Vec_x_1, 1.5);
+        //VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
         if (N_Solids){moveCenterMass(1.5);}
+      }
+      else //for basic
+      {
+        //VecCopy(Vec_x_0,Vec_x_1);
+        copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+        calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, current_time); // Adams-Bashforth
+        VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
+        if (N_Solids){moveCenterMass(1.0);}
       }
 
 /*
@@ -2100,7 +2160,6 @@ PetscErrorCode AppCtx::solveTimeProblem()
     steady_error /= (Qmax==0.?1.:Qmax);
 
 
-
     if(time_step >= maxts) {
       cout << "\n==========================================\n";
       cout << "stop reason:\n";
@@ -2143,8 +2202,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
         vtk_printer.addCellScalarVtk("pressure", GetDataPressCellVersion(q_array, *this));
 
       vtk_printer.addCellIntVtk("cell_tag", GetDataCellTag(*this));
-
       //vtk_printer.printPointTagVtk("point_tag");
+
       VecRestoreArray(Vec_uzp_0, &q_array);  //VecRestoreArray(Vec_up_0, &q_array);
       VecRestoreArray(Vec_normal, &nml_array);
       VecRestoreArray(Vec_v_mid, &v_array);
@@ -2867,10 +2926,12 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
         XG_0[s] = XG_temp;
       }
       else if (is_bdf2_ab){
-        cout << "do" << endl;
+        XG_temp = XG_1[s];
+        XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
+        XG_0[s] = XG_temp;
       }
     }
-    else{  //for MR-AB
+    else{  //for MR-AB and basic
       XG_temp = XG_1[s];
       XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
       XG_0[s] = XG_temp;
@@ -2879,376 +2940,6 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
   }
   PetscFunctionReturn(0);
 }
-
-#if (false)
-// TODO Only for 2D !!!!!!!!!!!!!!!!!!
-void AppCtx::printContactAngle(bool _print)
-{
-  if (!_print)
-    return;
-
-  //at file:
-  // current_time theta_max theta_min
-
-  int tag;
-  double theta_max=0;
-  double theta_min=pi;
-  double tet;
-  Vector X(dim);
-  Vector normal_solid(dim);
-  Vector normal_surf(dim);
-  VectorXi vtx_dofs_mesh(dim);
-
-  Point* plc = NULL;
-
-  point_iterator point = mesh->pointBegin();
-  point_iterator point_end = mesh->pointEnd();
-  for (; point != point_end; ++point)
-  {
-    tag = point->getTag();
-
-    if (!is_in(tag,triple_tags))
-      continue;
-
-    point->getCoord(X.data(), dim);
-    normal_solid = solid_normal(X, current_time, tag);
-    dof_handler[DH_MESH].getVariable(VAR_M).getVertexDofs(vtx_dofs_mesh.data(), &*point);
-    VecGetValues(Vec_normal, dim, vtx_dofs_mesh.data(), normal_surf.data());
-
-    tet = asin(sqrt(1. - pow(normal_solid.dot(normal_surf),2)  ));
-
-    if (tet < theta_min)
-      theta_min = tet;
-    if (tet > theta_max)
-      theta_max = tet;
-
-    if (X(0)>0)
-      plc = &*point;
-  }
-
-  theta_min = theta_min*180./pi;
-  theta_max = theta_max*180./pi;
-
-  cout << "theta min: " << theta_min << "\ntheta max: " << theta_max << endl;
-
-
-  // also print some energies
-  double field_energy   = 0;
-  double kinetic_energy = 0;
-  double euler_dissip   = 0; // ver Gerbeau
-  double viscous_power  = 0;
-  double surface_energy = 0;
-  double solid_power    = 0;
-  double cl_power       = 0;
-  double volume         = 0;
-
-  // Field energy, Kinetic energy, Viscous power
-  // The variables are at time step n by default
-  {
-    MatrixXd            u_coefs_c(n_dofs_u_per_cell/dim, dim);
-    MatrixXd            u_coefs_c_trans(dim,n_dofs_u_per_cell/dim);
-    MatrixXd            u_coefs_c_new(n_dofs_u_per_cell/dim, dim);
-    MatrixXd            u_coefs_c_t_new(dim,n_dofs_u_per_cell/dim);
-    VectorXd            p_coefs_c(n_dofs_p_per_cell);
-    MatrixXd            x_coefs_c(nodes_per_cell, dim);
-    MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
-    Tensor              F_c(dim,dim), invF_c(dim,dim), invFT_c(dim,dim);
-    MatrixXd            dxphi_c(n_dofs_u_per_cell/dim, dim);
-    MatrixXd            dxpsi_c(n_dofs_p_per_cell, dim);
-    MatrixXd            dxqsi_c(nodes_per_cell, dim);
-    Tensor              dxU(dim,dim); // grad u
-    Vector              dxP(dim);     // grad p
-    Vector              Xqp(dim);
-    Vector              Uqp(dim);
-    Vector              Uqp_new(dim);
-
-//    double              Pqp;
-    VectorXi            cell_nodes(nodes_per_cell);
-    double              Jx, JxW;
-    double              weight;
-    int                 tag;
-
-    VectorXi            mapU_c(n_dofs_u_per_cell);
-    VectorXi            mapU_r(n_dofs_u_per_corner);
-    VectorXi            mapP_c(n_dofs_p_per_cell);
-    VectorXi            mapP_r(n_dofs_p_per_corner);
-    VectorXi            mapM_c(dim*nodes_per_cell);
-    VectorXi            mapM_r(dim*nodes_per_corner);
-
-
-    cell_iterator cell = mesh->cellBegin();
-    cell_iterator cell_end = mesh->cellEnd();
-    for (; cell != cell_end; ++cell)
-    {
-      tag = cell->getTag();
-
-      // mapeamento do local para o global:
-      //
-      dof_handler[DH_UNKS].getVariable(VAR_U).getCellDofs(mapU_c.data(), &*cell);
-      dof_handler[DH_UNKS].getVariable(VAR_P).getCellDofs(mapP_c.data(), &*cell);
-      dof_handler[DH_MESH].getVariable(VAR_M).getCellDofs(mapM_c.data(), &*cell);
-
-      /*  old coefs */
-      VecGetValues(Vec_up_0, mapU_c.size(), mapU_c.data(), u_coefs_c.data());
-      VecGetValues(Vec_up_0, mapP_c.size(), mapP_c.data(), p_coefs_c.data());
-      VecGetValues(Vec_x_0,  mapM_c.size(), mapM_c.data(), x_coefs_c.data());
-
-      // new coefs
-      VecGetValues(Vec_up_1, mapU_c.size(), mapU_c.data(), u_coefs_c_new.data());
-
-      u_coefs_c_trans = u_coefs_c.transpose();
-      u_coefs_c_t_new = u_coefs_c_new.transpose();
-
-      //mesh->getCellNodesId(&*cell, cell_nodes.data());
-      //mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
-      x_coefs_c_trans = x_coefs_c.transpose();
-
-      for (int qp = 0; qp < n_qpts_cell; ++qp)
-      {
-        F_c    = x_coefs_c_trans * dLqsi_c[qp];
-        Jx     = F_c.determinant();
-        invF_c = F_c.inverse();
-        invFT_c= invF_c.transpose();
-
-        dxphi_c = dLphi_c[qp] * invF_c;
-        dxpsi_c = dLpsi_c[qp] * invF_c;
-        dxqsi_c = dLqsi_c[qp] * invF_c;
-
-        dxP  = dxpsi_c.transpose() * p_coefs_c;
-        dxU  = u_coefs_c_trans * dxphi_c;       // n+utheta
-
-        Xqp  = x_coefs_c_trans * qsi_c[qp]; // coordenada espacial (x,y,z) do ponto de quadratura
-        Uqp  = u_coefs_c_trans * phi_c[qp];
-        Uqp_new = u_coefs_c_t_new * phi_c[qp];
-        //Pqp  = p_coefs_c.dot(psi_c[qp]);
-
-        weight = quadr_cell->weight(qp);
-        JxW = Jx*weight;
-
-        field_energy   += force(Xqp,current_time,tag).dot(Xqp) * JxW;
-        kinetic_energy += 0.5* pho(Xqp,tag) * Uqp.squaredNorm() * JxW;
-        euler_dissip   += 0.5* pho(Xqp,tag) * (Uqp-Uqp_new).squaredNorm() * JxW / dt;
-        viscous_power  += 0.5* muu(tag)* (dxU + dxU.transpose()).squaredNorm() * JxW;
-        volume         += JxW;
-
-      } // fim quadratura
-
-    } // end elementos
-
-  }
-
-
-  // Surface energy
-  {
-    MatrixXd            u_coefs_f(n_dofs_u_per_facet/dim, dim);
-    MatrixXd            u_coefs_f_trans(dim,n_dofs_u_per_facet/dim);
-    VectorXd            p_coefs_f(n_dofs_p_per_facet);
-    MatrixXd            x_coefs_f(nodes_per_facet, dim);
-    MatrixXd            x_coefs_f_trans(dim, nodes_per_facet);
-    Tensor             F_f(dim,dim-1);       //
-    Tensor             invF_f(dim-1,dim);    //
-    Tensor             fff_f(dim-1,dim-1);   //  fff = first fundamental form
-    MatrixXd            dxphi_f(n_dofs_u_per_facet/dim, dim);
-    MatrixXd            dxqsi_f(nodes_per_facet, dim);
-    Vector             Xqp(dim);
-    Vector             Uqp(dim);
-
-    VectorXi            facet_nodes(nodes_per_facet);
-    double              Jx, JxW;
-    double              weight;
-    int                 tag;
-    bool                is_neumann;
-    bool                is_surface;
-    bool                is_solid;
-
-    VectorXi            mapU_f(n_dofs_u_per_facet);
-    VectorXi            mapP_f(n_dofs_p_per_facet);
-    VectorXi            mapM_f(dim*nodes_per_facet);
-
-
-    facet_iterator facet = mesh->facetBegin();
-    facet_iterator facet_end = mesh->facetEnd();
-    for (; facet != facet_end; ++facet)
-    {
-      tag = facet->getTag();
-
-      is_neumann = (neumann_tags.end() != std::find(neumann_tags.begin(), neumann_tags.end(), tag));
-      is_surface = (interface_tags.end() != std::find(interface_tags.begin(), interface_tags.end(), tag));
-      is_solid = (solid_tags.end() != std::find(solid_tags.begin(), solid_tags.end(), tag));
-
-      if ((!is_neumann) && (!is_surface) && (!is_solid))
-        //PetscFunctionReturn(0);
-        continue;
-
-      // mapeamento do local para o global:
-      //
-      dof_handler[DH_UNKS].getVariable(VAR_U).getFacetDofs(mapU_f.data(), &*facet);
-      dof_handler[DH_UNKS].getVariable(VAR_P).getFacetDofs(mapP_f.data(), &*facet);
-      dof_handler[DH_MESH].getVariable(VAR_M).getFacetDofs(mapM_f.data(), &*facet);
-
-      /*  Pega os valores das variáveis nos graus de liberdade */
-      VecGetValues(Vec_up_0, mapU_f.size(), mapU_f.data(), u_coefs_f.data());
-      VecGetValues(Vec_up_0, mapP_f.size(), mapP_f.data(), p_coefs_f.data());
-      VecGetValues(Vec_x_0,  mapM_f.size(), mapM_f.data(), x_coefs_f.data());
-
-      u_coefs_f_trans = u_coefs_f.transpose();
-
-      //mesh->getFacetNodesId(&*facet, facet_nodes.data());
-      //mesh->getNodesCoords(facet_nodes.begin(), facet_nodes.end(), x_coefs_f.data());
-      x_coefs_f_trans = x_coefs_f.transpose();
-
-      for (int qp = 0; qp < n_qpts_facet; ++qp)
-      {
-        F_f    = x_coefs_f_trans * dLqsi_f[qp];
-        fff_f.resize(dim-1,dim-1);
-        fff_f  = F_f.transpose()*F_f;
-        Jx     = sqrt(fff_f.determinant());
-        invF_f = fff_f.inverse()*F_f.transpose();
-
-        dxphi_f = dLphi_f[qp] * invF_f;
-        dxqsi_f = dLqsi_f[qp] * invF_f;
-
-        Xqp  = x_coefs_f_trans * qsi_f[qp]; // coordenada espacial (x,y,z) do ponto de quadratura
-        Uqp  = u_coefs_f_trans * phi_f[qp];
-
-        weight = quadr_facet->weight(qp);
-        JxW = Jx*weight;
-
-
-        //if (is_neumann)
-        //{
-        //  //Vector no(Xqp);
-        //  //no.normalize();
-        //  //traction_ = utheta*(traction(Xqp,current_time+dt,tag)) + (1.-utheta)*traction(Xqp,current_time,tag);
-        //  traction_ = traction(Xqp, normal, current_time + dt/2,tag);
-        //  //traction_ = (traction(Xqp,current_time,tag) +4.*traction(Xqp,current_time+dt/2.,tag) + traction(Xqp,current_time+dt,tag))/6.;
-        //
-        //  for (int i = 0; i < n_dofs_u_per_facet/dim; ++i)
-        //  {
-        //    for (int c = 0; c < dim; ++c)
-        //    {
-        //      FUloc(i*dim + c) -= JxW_mid * traction_(c) * phi_f[qp][i] ; // força
-        //    }
-        //  }
-        //}
-        //
-        if (is_surface)
-        {
-          surface_energy += JxW * gama(Xqp,current_time,tag);
-        }
-
-        if (is_solid)
-        {
-          // obs gama_s = - gama*cos(theta)
-          //surface_energy -= JxW * gama(Xqp,current_time,tag) * cos_theta0(); // comente isso para ser igual do gerbeau
-          solid_power +=  JxW * beta_diss() * Uqp.dot(Uqp - solid_veloc(Xqp,current_time,tag));
-        }
-
-
-      } // fim quadratura
-
-    } // end elementos
-
-  }
-
-
-  // Cl energy (2D only)
-  if (dim == 2)
-  {
-    Vector              line_normal(dim);
-    Vector              Xqp(dim);
-    Vector              aux(dim);
-    Vector              normal(dim);
-    Vector              U(dim);
-    VectorXi            mapU_f(dim);
-    int tag;
-    point_iterator point = mesh->pointBegin();
-    point_iterator point_end = mesh->pointEnd();
-    for (; point != point_end; ++point)
-    {
-      tag = point->getTag();
-      if (!is_in(tag, triple_tags))
-        continue;
-
-      // compute line normal
-      {
-        Point * sol_point = NULL;
-        Point * sol_point_2;
-        int iVs[FEPIC_MAX_ICELLS];
-        int *iVs_end, *iVs_it;
-        Vector aux(dim);
-
-        iVs_end = mesh->connectedVtcs(&*point, iVs);
-
-        // se esse nó está na linha, então existe um vértice vizinho que está no sólido
-        for (iVs_it = iVs; iVs_it != iVs_end ; ++iVs_it)
-        {
-          sol_point_2 = mesh->getNodePtr(*iVs_it);
-          if ( is_in(sol_point_2->getTag(), solid_tags) )
-            if( !sol_point || (sol_point_2->getTag() > sol_point->getTag()) )
-              sol_point = sol_point_2;
-        }
-        if (!sol_point)
-        {
-          //FEP_PRAGMA_OMP(critical)
-          {
-            printf("ERRO: ponto na linha tríplice não tem um vértice vizinho no sólido");
-            throw;
-          }
-        }
-        point->getCoord(Xqp.data(),dim);
-
-        normal = solid_normal(Xqp, current_time, tag);
-
-        sol_point->getCoord(aux.data(),dim);
-
-
-        // choose a line_normal candidate
-        line_normal(0) = -normal(1);
-        line_normal(1) =  normal(0);
-
-        // check orientation
-        if (line_normal.dot(Xqp-aux) < 0)
-          line_normal *= -1;
-      }
-
-      //
-      dof_handler[DH_UNKS].getVariable(VAR_U).getVertexDofs(mapU_f.data(), &*point);
-
-      /*  Pega os valores das variáveis nos graus de liberdade */
-      VecGetValues(Vec_up_0, mapU_f.size(), mapU_f.data(), U.data());
-
-      cl_power += gama(Xqp,current_time,tag)*cos_theta0()*line_normal.dot(U);
-    }
-
-  }
-
-  ofstream File("ContactHistory", ios::app);
-
-  plc = mesh->getNodePtr(0);
-  if (plc!=NULL && mesh->isVertex(plc))
-  {
-    int dofs[3];
-    dof_handler[DH_MESH].getVariable(VAR_M).getVertexDofs(dofs, &*plc);
-    VecGetValues(Vec_x_0,  dim, dofs, X.data());
-  }
-  File.precision(12);
-  File << current_time << " "
-       << theta_min << " "
-       << theta_max << " "
-       << fabs(X(1)) <<" "
-       << viscous_power << " "
-       << kinetic_energy << " "
-       << euler_dissip << " "
-       << field_energy << " "
-       << surface_energy << " "
-       << solid_power << " "
-       << cl_power << " "
-       << endl;
-
-  File.close();
-}
-#endif
 
 void AppCtx::freePetscObjs()
 {

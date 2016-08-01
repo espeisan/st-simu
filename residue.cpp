@@ -269,12 +269,13 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       if (!is_bdf_euler_start)
         utheta = 0.5;
   }
-  else
-  if (is_bdf3)
+  else if (is_bdf3)
   {
     if (time_step <= 1)
       utheta = 0.5;
   }
+  //else if (is_basic)
+  //  utheta = 0.0;
 
   // NOTE: solve elasticity problem in the mesh at time step n
   // NOTE: The mesh used is the Vec_x_0
@@ -336,7 +337,7 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       if ((is_bdf2 && time_step > 0) || (is_bdf3 && time_step > 1)) //the integration geometry is \bar{X}^{n+1}
         x_coefs_c = x_coefs_c_new;
       else
-        x_coefs_c = (1.-utheta)*x_coefs_c + utheta*x_coefs_c_new;
+        x_coefs_c = (1.-utheta)*x_coefs_c + utheta*x_coefs_c_new; // for MR-AB, this completes the geom extrap
 
       v_coefs_c_trans = v_coefs_c.transpose();
       x_coefs_c_trans = x_coefs_c.transpose();
@@ -535,7 +536,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
   {
     Vector X(dim);
     Vector X_new(dim);
-    if (behaviors & BH_Press_grad_elim)  //TODO:actualizar Q
+    if (behaviors & BH_Press_grad_elim)
     {
       //cell_iterator cell = mesh->cellBegin();
       //dof_handler[DH_UNKS].getVariable(VAR_P).getCellDofs(&null_space_press_dof, &*cell);
@@ -552,7 +553,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       VecGetValues(Vec_x_1, dim, x_dofs, X_new.data());
       VecGetValues(Vec_x_0, dim, x_dofs, X.data());
       X = .5*(X+X_new);
-      //dof_handler[DH_UNKS].getVariable(VAR_P).getVertexDofs(&null_space_press_dof, &*point);
+      dof_handler[DH_UNKM].getVariable(VAR_P).getVertexDofs(&null_space_press_dof, &*point);
       // fix the initial guess
       VecSetValue(Vec_uzp_k, null_space_press_dof, p_exact(X,current_time+.5*dt,point->getTag()), INSERT_VALUES);
     }
