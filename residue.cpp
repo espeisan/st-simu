@@ -546,7 +546,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     else
     {
       point_iterator point = mesh->pointBegin();
-      while (!mesh->isVertex(&*point))
+      while (!( mesh->isVertex(&*point) && is_in(point->getTag(),dirichlet_tags) ))
         ++point;
       int x_dofs[3];
       dof_handler[DH_MESH].getVariable(VAR_M).getVertexDofs(x_dofs, &*point);
@@ -574,9 +574,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
   MatZeroEntries(*JJ);
 
   // LOOP NAS CÉLULAS Parallel (uncomment it)
-//#ifdef FEP_HAS_OPENMP
-//  FEP_PRAGMA_OMP(parallel default(none) shared(Vec_uzp_k,Vec_fun_fs,cout,null_space_press_dof,JJ,utheta,iter,XG_mid))
-//#endif
+#ifdef FEP_HAS_OPENMP
+  FEP_PRAGMA_OMP(parallel default(none) shared(Vec_uzp_k,Vec_fun_fs,cout,null_space_press_dof,JJ,utheta,iter,XG_mid))
+#endif
   {
     VectorXd          FUloc(n_dofs_u_per_cell);  // U subvector part of F
     VectorXd          FPloc(n_dofs_p_per_cell);

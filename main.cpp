@@ -266,7 +266,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
-  is_mr_ab           = PETSC_FALSE;
+  is_mr_ab           = PETSC_TRUE;
   is_bdf3            = PETSC_FALSE;
   is_bdf2            = PETSC_FALSE;
   is_bdf2_bdfe       = PETSC_FALSE;
@@ -274,7 +274,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   is_bdf_cte_vel     = PETSC_FALSE;
   is_bdf_euler_start = PETSC_FALSE;
   is_bdf_extrap_cte  = PETSC_FALSE;
-  is_basic           = PETSC_TRUE;
+  is_basic           = PETSC_FALSE;
 
   if ((is_bdf2 && utheta!=1) || (is_bdf3 && utheta!=1))
   {
