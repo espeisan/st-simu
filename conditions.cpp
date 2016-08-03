@@ -46,13 +46,13 @@ TensorZ MI_tensor(double M, double R, int dim);
 
 double pho(Vector const& X, int tag)
 {
-  if (tag == 16)
+  if (tag == 102)
   {
-    return 1.0e3;
+    return 6.4e1; //1.0e3;
   }
   else
   {
-    return 8.0e2;
+    return 1.0; //8.0e2;
   }
 }
 
@@ -73,18 +73,18 @@ double beta_diss()
 
 double gama(Vector const& X, double t, int tag)
 {
-  return 0.02;
+  return 1.0;
 }
 
 double muu(int tag)
 {
-  if (tag == 16)
+  if (tag == 102)
   {
-    return 1.0e-3;
+    return 1.0e3;
   }
   else
   {
-    return 3.0e-1;
+    return 1.0;
   }
 }
 
@@ -94,7 +94,7 @@ Vector force(Vector const& X, double t, int tag)
   double y = X(1);
 
   Vector f(Vector::Zero(X.size()));
-  f(1) = 10;
+  //f(1) = 10;
   return f;
 }
 
@@ -103,8 +103,31 @@ Vector u_exact(Vector const& X, double t, int tag)
   double x = X(0);
   double y = X(1);
   double un = 998*9.8*2.85e-4*2.85e-4/(3*1e-3);
+  double w1 = 0.0, w2 = 1.0, R1 = .25, R2 = 1;
+  //Vector v(Vector::Ones(X.size()));  v << 1 , 2;
   Vector v(Vector::Zero(X.size()));
-
+  double r  = sqrt(x*x+y*y);
+  double Fr = (R2*w2-R1*w1)*(r-R1)/(R2-R1) + R1*w1;
+  double Lr = r*w2;
+  double nu = muu(tag)/pho(X,tag);
+  double C  = 78.0;
+  double uc = exp(-C*nu*t)*(Fr-Lr)+Lr;
+  v(0) = -y*Lr/r;
+  v(1) =  x*Lr/r;
+  if ( t == 0 ){
+    if (tag == 1){
+      v(0) = -w2*y;
+      v(1) =  w2*x;
+    }
+    else if (tag == 1 && t >= 3 && false){
+      v(0) =  w2*y;
+      v(1) = -w2*x;
+    }
+    else{
+      v(0) = 0;
+      v(1) = 0;
+    }
+  }
   return v;
 }
 
@@ -112,7 +135,10 @@ Tensor grad_u_exact(Vector const& X, double t, int tag)
 {
   double x = X(0);
   double y = X(1);
+  double w2 = 2.0;
   Tensor dxU(Tensor::Zero(X.size(), X.size()));
+  dxU(0,0) = 0; dxU(0,1) = -w2;
+  dxU(1,0) = w2; dxU(1,1) = 0;
 
   return dxU;
 }
@@ -121,14 +147,8 @@ double p_exact(Vector const& X, double t, int tag)
 {
   double x = X(0);
   double y = X(1);
-  if (tag == 16)
-  {
-    return 400.0;
-  }
-  else
-  {
-    return 0.0;
-  }
+
+  return 0.0;
 }
 
 Vector grad_p_exact(Vector const& X, double t, int tag)
@@ -195,6 +215,32 @@ Tensor feature_proj(Vector const& X, double t, int tag)
 {
   Tensor f(Tensor::Zero(X.size(), X.size()));
   return f;
+}
+
+Vector z_exact(Vector const& X, double t, int tag)
+{
+  double w2 = 2.0;
+  int dim = X.size();
+  int LZ = 3*(dim-1);
+  Vector v(Vector::Zero(LZ)); //v << 0, 0, 10;
+  if (t > 0){
+    v(2) = w2;
+  }
+  //Vector v(Vector::Ones(LZ));
+  return v;
+}
+
+Vector gravity(Vector const& X, int dim){
+  double x = X(0);
+  double y = X(1);
+
+  Vector f(Vector::Zero(3*(dim-1)));
+  return f;
+}
+
+Vector z_initial(Vector const& X, int tag)
+{
+  return z_exact(X,0,tag);
 }
 
 #endif
@@ -706,7 +752,6 @@ Vector gravity(Vector const& X, int dim){
   Vector f(Vector::Zero(3*(dim-1)));
   return f;
 }
-
 
 Vector u_exact(Vector const& X, double t, int tag)
 {
