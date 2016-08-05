@@ -1,6 +1,6 @@
 -dim 2
--dt 0.001
--finaltime 5
+-dt 0.1
+-finaltime 3300
 -maxts -40
 -renumber_dofs 0
 -print_step 1
@@ -9,21 +9,21 @@
 -boundary_smoothing 0
 -force_mesh_velocity 0
 -nonlinear_elasticity 0
--mesh_adapt 1
+-mesh_adapt 0
 -fprint_ca 0
 beta1 0.0
 beta2 1.0
 -plot_es 1
 -family_files 1
 -sst -1.e-7
--utheta 0.5
--vtheta 0.5
+-utheta 1.0
+-vtheta -10000000000000
 -quadr_c 4
 -quadr_f 3
 -quadr_r 2
 -quadr_e 8
 -ale 1
--force_pressure 0
+-force_pressure 1
 -print_to_matlab 1
 
 -pc_type lu lu 
@@ -77,13 +77,15 @@ mat_threads 3
 use_thread_pool main
 nthreads 3
 
-canal      dir_tags 2,1 neum_tags 3 feature_tags 3
-solid 2d    dir_tags 13  fsi_tags 14  fonly_tags 15,13
-solid 2d 2b dir_tags 1-5,33  fsi_tags 5  fonly_tags 1-5,100,33
-solid 2d 3b dir_tags 1-6  fsi_tags 101-104  fonly_tags 1-7
-solid 2d 3b dir_tags 1-6  fsi_tags 101,102  fonly_tags 1-6,10
-solid 2d 3b -dir_tags 1-6  -fsi_tags 101-111  -fonly_tags 1-6,10
-solid 2d Nb dir_tags 1-6  fsi_tags 101-111  fonly_tags 1-6,10
+canal                dir_tags 2,1  neum_tags 3  feature_tags 3
+solid 2d          dir_tags 13  fsi_tags 14  fonly_tags 15,13
+solid 2d 2b   dir_tags 1-5,33  fsi_tags 5  fonly_tags 1-5,100,33
+solid 2d 3b   dir_tags 1-6  fsi_tags 101,102  sonly_tags 103,104  fonly_tags 10  interf_tags 101
+solid 2d 1b   dir_tags 1-6  fsi_tags 101  sonly_tags 102  fonly_tags 10  interf_tags 101
+solid 2d Nb  dir_tags 1-6  fsi_tags 101-111  fonly_tags 1-6,10
+solid 3d 1b   dir_tags 1-9  fsi_tags 101  sonly_tags 102  fonly_tags 10  interf_tags 101
+rotsol 2d 1b  dir_tags 1  fsi_tags 101  sonly_tags 102  fonly_tags 10  interf_tags 101
+rotbur 2d 1d  -dir_tags 1  fsi_tags 101  sonly_tags 102  fonly_tags 10  -interf_tags 101
 
 function_space 1
 function_space 2
@@ -109,17 +111,32 @@ mesh_type 4096
 fin results/canal/canal_ord1.msh
 fout results/canal/canal.vtk
 
+fin results/sol_asc/2d/2sol1.msh
+fout results/sol_asc/2d/2sol1/2sol1_.vtk
+min results/sol_asc/2d/2sol.txt
+hout results/sol_asc/2d/2sol1
+
 fin results/sol_asc/2d/1sol1.msh
 fout results/sol_asc/2d/1sol1/1sol1_.vtk
-min results/sol_asc/2d/1sol.txt
+min results/sol_asc/2d/1sol1.txt
 hout results/sol_asc/2d/1sol1
-
--fin results/sol_asc/2d/2sol1.msh
--fout results/sol_asc/2d/2sol1/2sol1_.vtk
--min results/sol_asc/2d/2sol.txt
--hout results/sol_asc/2d/2sol1
 
 fin results/sol_asc/2d/Nsol1.msh
 fout results/sol_asc/2d/Nsol1/Nsol1_.vtk
 min results/sol_asc/2d/Nsol1.txt
 hout results/sol_asc/2d/Nsol1
+
+fin results/sol_asc/3d/1sol1.msh
+fout results/sol_asc/3d/1sol1/Nsol1_.vtk
+min results/sol_asc/3d/1sol1.txt
+hout results/sol_asc/3d/1sol1
+
+fin results/rot_cyl/2d/1sol1.msh
+fout results/rot_cyl/2d/1sol1/1sol1_.vtk
+min results/rot_cyl/2d/1sol1.txt
+hout results/rot_cyl/2d/1sol1
+
+-fin results/rot_cyl/2d/1sol1.msh
+-fout results/rot_cyl/2d/1bur1/1bur1_.vtk
+min results/rot_cyl/2d/1sol1.txt
+hout results/rot_cyl/2d/1bur1

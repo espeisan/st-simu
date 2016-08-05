@@ -39,6 +39,8 @@ Vector force_rgb(Vector const& Xi, Vector const& Xj, double const Ri, double con
 Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double const Rj,
                  double ep, double zeta);
 TensorZ MI_tensor(double M, double R, int dim);
+Tensor RotM(double theta, int dim);
+Vector SlipVel(Vector const& XG, Vector const& X, int dim, int tag);
 
 
 // gota estática 2d/////////////////////////////////////////////////////////////
@@ -923,8 +925,6 @@ Vector force_pw(Vector const& Xi, Vector const& Xj, double Ri,
   return f;
 }
 
-#endif
-
 Vector force_ppl(Vector const& Xi, Vector const& Xj, double ep, double zeta)
 {
   Vector f(Vector::Zero(Xi.size()));
@@ -986,3 +986,43 @@ TensorZ MI_tensor(double M, double R, int dim)
   }
   return MI;
 }
+
+Tensor RotM(double theta, int dim)
+{
+  Tensor M(Tensor::Zero(3,3));
+  if (dim == 2){
+    M(0,0) = cos(theta); M(0,1) = -sin(theta);
+    M(1,0) = sin(theta); M(1,1) =  cos(theta);
+  }
+  if (dim == 3){
+    cout << "Not yet" << endl;
+  }
+  return M;
+}
+
+Vector SlipVel(Vector const& XG, Vector const& X, int dim, int tag)
+{
+  Vector V(Vector::Zero(dim));
+  Vector X3(Vector::Zero(3));
+  Vector Xp(Vector::Zero(dim));
+  double alp = 0.1;
+  double bet = 0.1;
+
+  if (dim == 2)
+  {
+    X3(0) = X(0); X3(1) = X(1);
+    X3 = X3 - XG;
+    X3.normalize();
+    Xp(0) = X3(1); Xp(1) = -X3(0);
+    if (tag == 104){
+      V = alp*Xp;
+    }
+    else if (tag == 105){
+      V = -bet*Xp;
+    }
+  }
+
+  return V;
+}
+
+#endif

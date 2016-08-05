@@ -839,12 +839,11 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
       VecGetValues(Vec_duzp,    mapU_c.size(), mapU_c.data(), du_coefs_c_old.data()); // bdf2,bdf3
       VecGetValues(Vec_uzp_m1,  mapU_c.size(), mapU_c.data(), u_coefs_c_om1.data()); // bdf2,bdf3
-      VecGetValues(Vec_uzp_m1,  mapU_t.size(), mapU_t.data(), u_coefs_c_om1c.data()); // bdf2,bdf3
+      if (N_Solids) VecGetValues(Vec_uzp_m1,  mapU_t.size(), mapU_t.data(), u_coefs_c_om1c.data()); // bdf2,bdf3
       if (is_bdf3){
         VecGetValues(Vec_duzp_0,  mapU_c.size(), mapU_c.data(), du_coefs_c_vold.data()); // bdf3
         VecGetValues(Vec_uzp_m2,  mapU_c.size(), mapU_c.data(), u_coefs_c_om2.data());
-        VecGetValues(Vec_uzp_m2,  mapU_t.size(), mapU_t.data(), u_coefs_c_om2c.data()); // bdf3
-
+        if (N_Solids) VecGetValues(Vec_uzp_m2,  mapU_t.size(), mapU_t.data(), u_coefs_c_om2c.data()); // bdf3
       }
 
       // get nodal coordinates of the old and new cell

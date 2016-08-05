@@ -124,6 +124,8 @@ Vector force_rgb(Vector const& Xi, Vector const& Xj, double const Ri, double con
 Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double const Rj,
                  double ep, double zeta);
 TensorZ MI_tensor(double M, double R, int dim);
+Tensor RotM(double theta, int dim);
+Vector SlipVel(Vector const& XG, Vector const& X, int dim, int tag);
 
 inline double sqr(double v) {return v*v;}
 
@@ -443,6 +445,7 @@ public:
   PetscErrorCode updateSolidVel();
   void getSolidVolume();
   PetscErrorCode moveCenterMass(double vtheta);
+  PetscErrorCode updateSolidMesh();
   //void printContactAngle(bool _print);
 
   void computeError(Vec const& Vec_x, Vec &Vec_up_1, double tt);
@@ -525,6 +528,7 @@ public:
   std::vector<int> flusoli_tags;  //fluid solid interface
   std::vector<int> fluidonly_tags;  //fluid only
   std::vector<int> solidonly_tags;  //solid only
+  std::vector<int> slipvel_tags;
 
   DofHandler                   dof_handler[2];  //or 3
   MeshIoMsh                    msh_reader;
@@ -635,6 +639,7 @@ public:
   std::vector<double>    MV, RV, VV;  //mass vector, radius vector, area vector
   std::vector<Vector3d>  XG_0, XG_1, XG_aux;
   double                 hme, hmn, hmx;
+  std::vector<double>    theta_0, theta_1, theta_aux;
   //bool                   casevar = true, casevarc = true; //case variable or const to H solid vel functional
 
   // mesh alias

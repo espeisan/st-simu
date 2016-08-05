@@ -388,13 +388,21 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   else
 	fluidonly_tags.clear();
 
-  solidonly_tags.resize(16);  //cout << flusol_tags.max_size() << endl;
+  solidonly_tags.resize(16);
   nmax = solidonly_tags.size();
   PetscOptionsGetIntArray(PETSC_NULL, "-sonly_tags", solidonly_tags.data(), &nmax, &flg_tags);
   if (flg_tags)
     solidonly_tags.resize(nmax);
   else
     solidonly_tags.clear();
+
+  slipvel_tags.resize(16);
+  nmax = slipvel_tags.size();
+  PetscOptionsGetIntArray(PETSC_NULL, "-slipv_tags", slipvel_tags.data(), &nmax, &flg_tags);
+  if (flg_tags)
+    slipvel_tags.resize(nmax);
+  else
+    slipvel_tags.clear();
 
   PetscOptionsEnd();   //Finish PetscOptions*
 
@@ -485,10 +493,12 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
       Xg << xg, yg, zg;
       MV.push_back(mass); RV.push_back(rad); VV.push_back(vol);
       XG_1.push_back(Xg); XG_0.push_back(Xg); XG_aux.push_back(Xg);
+      theta_1.push_back(0.0); theta_0.push_back(0.0); theta_aux.push_back(0.0);
     }
     is.close();
     MV.resize(N_Solids); RV.resize(N_Solids); VV.resize(N_Solids);
     XG_1.resize(N_Solids); XG_0.resize(N_Solids); XG_aux.resize(N_Solids);
+    theta_1.resize(N_Solids); theta_0.resize(N_Solids); theta_aux.resize(N_Solids);
   }
 
   if (flg_hout){
@@ -1463,7 +1473,9 @@ PetscErrorCode AppCtx::setInitialConditions()
         VecSetValues(Vec_uzp_0, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);  //cout << dofs_fs.transpose() << endl;
         Xg = XG_0[nod_id+nod_is-1];
         Xg(0) = Xg(0)+dt*Zf(0); Xg(1) = Xg(1)+dt*Zf(1); if (dim == 3){Xg(2) = Xg(2)+dt*Zf(2);}
-        XG_1[nod_id+nod_is-1] = Xg;  SV[nod_id+nod_is-1] = true;
+        XG_1[nod_id+nod_is-1] = Xg;
+        theta_1[nod_id+nod_is-1] = theta_0[nod_id+nod_is-1] + dt*Zf(2);
+        SV[nod_id+nod_is-1] = true;
       }
     }
     else{
@@ -1481,6 +1493,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, 0.0); //Vec_up_0 = Vec_up_1, vtheta = 1.0, mean b.c. = Vec_up_1 = Vec_v_mid init. guess SNESSolve
   // move the mesh
   VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = dt*Vec_v_mid + Vec_x_0 // for zero Dir. cond. solution lin. elast. is Vec_v_mid = 0
+  if (N_Solids) updateSolidMesh();
   //VecView(Vec_v_mid,PETSC_VIEWER_STDOUT_WORLD); //VecView(Vec_x_0,PETSC_VIEWER_STDOUT_WORLD); VecView(Vec_x_1,PETSC_VIEWER_STDOUT_WORLD);
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
 
@@ -1514,7 +1527,10 @@ PetscErrorCode AppCtx::setInitialConditions()
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
           // move the mesh
           VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
-          if (N_Solids) {moveCenterMass(0.5);}
+          if (N_Solids){
+            moveCenterMass(0.5);
+            updateSolidMesh();
+          }
           //Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
           //compute normal for the next time step, at n+1/2
           {
@@ -1851,11 +1867,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
           filv << current_time << " ";
           for (int S = 0; S < (N_Solids-1); S++){
             Xgg = XG_0[S];
-            filg << Xgg(0) << " " << Xgg(1) << " "; if (dim == 3){filg << Xgg(2) << " ";} filg << " " << VV[S+1] << " ";
+            filg << Xgg(0) << " " << Xgg(1) << " "; if (dim == 3){filg << Xgg(2) << " ";} filg << " " << VV[S] << " " << theta_0[S];
             filv << v_coeffs_s(LZ*S) << " " << v_coeffs_s(LZ*S+1) << " " << v_coeffs_s(LZ*S+2) << " ";
           }
           Xgg = XG_0[N_Solids-1];
-          filg << Xgg(0) << " " << Xgg(1); if (dim == 3){filg << " "<< Xgg(2);} filg << " " << VV[N_Solids-1] << endl;
+          filg << Xgg(0) << " " << Xgg(1); if (dim == 3){filg << " "<< Xgg(2);} filg << " " << VV[N_Solids-1] << " " << theta_0[N_Solids-1] << endl;
           filv << v_coeffs_s(LZ*(N_Solids-1)) << " " << v_coeffs_s(LZ*(N_Solids-1)+1) << " "
                << v_coeffs_s(LZ*(N_Solids-1)+2);
           if (dim == 3){
@@ -2097,7 +2113,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
-        if (N_Solids){moveCenterMass(1.5);}
+        if (N_Solids){
+          moveCenterMass(1.5);
+          updateSolidMesh();
+        }
       }
       else //for basic
       {
@@ -2902,8 +2921,9 @@ PetscErrorCode AppCtx::updateSolidVel()
 
 PetscErrorCode AppCtx::moveCenterMass(double vtheta)
 {
-  VectorXi    dofs(dim);
-  Vector      U0(Vector::Zero(3)), U1(Vector::Zero(3)), XG_temp(Vector::Zero(3));
+  VectorXi    dofs(dim), dof(1);
+  Vector      U0(Vector::Zero(3)), U1(Vector::Zero(3)), XG_temp(Vector::Zero(3)), theta0(1), theta1(1);
+  double      theta_temp;
 
   for (int s = 0; s < N_Solids; s++){
 
@@ -2912,31 +2932,72 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
     }
     VecGetValues(Vec_uzp_0, dim, dofs.data(), U0.data());
     VecGetValues(Vec_uzp_1, dim, dofs.data(), U1.data());
+    dof(0) = n_unknowns_u + n_unknowns_p + LZ*s + dim;
+    VecGetValues(Vec_uzp_0, 1, dof.data(), theta0.data());
+    VecGetValues(Vec_uzp_1, 1, dof.data(), theta1.data());
 
     if (is_bdf3){
       XG_temp   = XG_1[s];
       XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*U0;
       XG_aux[s] = XG_0[s];
       XG_0[s]   = XG_temp;
+      theta_temp   = theta_1[s];
+      theta_1[s]   = (18./11.)*theta_1[s] - (9./11.)*theta_0[s] + (2./11.)*theta_aux[s] + (6./11.)*dt*theta0(0);
+      theta_aux[s] = theta_0[s];
+      theta_0[s]   = theta_temp;
     }
     else if (is_bdf2){
       if (is_bdf2_bdfe){
         XG_temp = XG_1[s];
         XG_1[s] = (4./3.)*XG_1[s] - (1./3.)*XG_0[s] + (2./3.)*dt*(vtheta*U1 + (1.-vtheta)*U0);
         XG_0[s] = XG_temp;
+        theta_temp = theta_1[s];
+        theta_1[s] = (4./3.)*theta_1[s] - (1./3.)*theta_0[s] + (2./3.)*dt*(vtheta*theta1(0) + (1.-vtheta)*theta0(0));
+        theta_0[s] = theta_temp;
       }
       else if (is_bdf2_ab){
         XG_temp = XG_1[s];
         XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
         XG_0[s] = XG_temp;
+        theta_temp = theta_1[s];
+        theta_1[s] = dt*(vtheta*theta1(0) + (1.-vtheta)*theta0(0)) + theta_0[s];
+        theta_0[s] = theta_temp;
       }
     }
     else{  //for MR-AB and basic
       XG_temp = XG_1[s];
       XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
       XG_0[s] = XG_temp;
+      theta_temp = theta_1[s];
+      theta_1[s] = dt*(vtheta*theta1(0) + (1.-vtheta)*theta0(0)) + theta_0[s];
+      theta_0[s] = theta_temp;
     }
 
+  }
+  PetscFunctionReturn(0);
+}
+
+PetscErrorCode AppCtx::updateSolidMesh()
+{
+  int tag, nod_id, nod_is;
+  VectorXi  dofs(dim);
+  Vector    X0(Vector::Zero(3));
+
+  point_iterator point = mesh->pointBegin();
+  point_iterator point_end = mesh->pointEnd();
+  for (; point != point_end; ++point)
+  {
+    tag = point->getTag();
+
+    nod_id = is_in_id(tag,flusoli_tags);
+    nod_is = is_in_id(tag,solidonly_tags);
+
+    if (nod_id || nod_is){
+      getNodeDofs(&*point, DH_UNKM, VAR_M, dofs.data());
+      VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X0.data());
+      X0 = RotM(theta_1[nod_id+nod_is-1]-theta_0[nod_id+nod_is-1],dim)*(X0 - XG_0[nod_id+nod_is-1]) + XG_1[nod_id+nod_is-1];
+      VecSetValues(Vec_x_1, dofs.size(), dofs.data(), X0.data(), INSERT_VALUES);
+    }
   }
   PetscFunctionReturn(0);
 }
