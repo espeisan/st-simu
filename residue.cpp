@@ -178,6 +178,7 @@ void getProjectorBC(MatrixBase<Derived> & P, int n_nodes, int const* nodes, Vec 
   Vec const& Vec_normal = app.Vec_normal;
   std::vector<int> const& flusoli_tags    = app.flusoli_tags;
   std::vector<int> const& solidonly_tags  = app.solidonly_tags;
+  std::vector<int> const& slipvel_tags    = app.slipvel_tags;
 
 
   P.setIdentity();
@@ -245,9 +246,9 @@ void getProjectorBC(MatrixBase<Derived> & P, int n_nodes, int const* nodes, Vec 
       }
     }
     else
-    //if (is_in(tag,triple_tags) || is_in(tag,dirichlet_tags) || is_in(tag,neumann_tags) || is_in(tag,periodic_tags) || is_in(tag,feature_tags))
     if (is_in(tag,triple_tags) || is_in(tag,dirichlet_tags) || is_in(tag,neumann_tags) || is_in(tag,periodic_tags)
-                               || is_in(tag,feature_tags)   || is_in(tag,flusoli_tags) || is_in(tag,solidonly_tags))
+                               || is_in(tag,feature_tags)   || is_in(tag,flusoli_tags) || is_in(tag,solidonly_tags)
+                               || is_in(tag,slipvel_tags))
     {
       P.block(i*dim,i*dim,dim,dim) = Z;
     }
@@ -471,7 +472,8 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
             is_in(tag,neumann_tags)   ||
             is_in(tag,periodic_tags)  ||
             is_in(tag,flusoli_tags)   ||
-            is_in(tag,solidonly_tags) ))
+            is_in(tag,solidonly_tags) ||
+            is_in(tag,slipvel_tags)))
         continue;
       //dof_handler[DH_UNKS].getVariable(VAR_U).getVertexAssociatedDofs(v_dofs, &*point);
       getNodeDofs(&*point, DH_MESH, VAR_M, v_dofs);
@@ -584,7 +586,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     VectorXd          FZloc(nodes_per_cell*LZ);
 
     /* local data */
-    int                 tag, tag_c, nod_id, nod_is;
+    int                 tag, tag_c, nod_id, nod_is, nod_vs, nodsum;
     MatrixXd            u_coefs_c_mid_trans(dim, n_dofs_u_per_cell/dim);  // n+utheta  // trans = transpost
     MatrixXd            u_coefs_c_old(n_dofs_u_per_cell/dim, dim);        // n
     MatrixXd            u_coefs_c_old_trans(dim,n_dofs_u_per_cell/dim);   // n
@@ -621,6 +623,16 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     MatrixXd            z_coefs_c_new(n_dofs_z_per_cell/LZ, LZ);        // n+1
     MatrixXd            z_coefs_c_new_trans(LZ,n_dofs_z_per_cell/LZ);   // n+1
     MatrixXd            z_coefs_c_auo(dim, nodes_per_cell), z_coefs_c_aun(dim, nodes_per_cell);
+
+    MatrixXd            vs_coefs_c_mid_trans(dim, n_dofs_u_per_cell/dim);  // n+utheta  // trans = transpost
+    MatrixXd            vs_coefs_c_old(n_dofs_u_per_cell/dim, dim);        // n
+    MatrixXd            vs_coefs_c_old_trans(dim,n_dofs_u_per_cell/dim);   // n
+    MatrixXd            vs_coefs_c_new(n_dofs_u_per_cell/dim, dim);        // n+1
+    MatrixXd            vs_coefs_c_new_trans(dim,n_dofs_u_per_cell/dim);   // n+1
+    MatrixXd            vs_coefs_c_om1(n_dofs_u_per_cell/dim, dim);        // n
+    MatrixXd            vs_coefs_c_om1_trans(dim,n_dofs_u_per_cell/dim);   // n
+    MatrixXd            vs_coefs_c_om2(n_dofs_u_per_cell/dim, dim);        // n-1
+    MatrixXd            vs_coefs_c_om2_trans(dim,n_dofs_u_per_cell/dim);   // n-1
 
     MatrixXd            x_coefs_c_mid_trans(dim, nodes_per_cell); // n+utheta
     MatrixXd            x_coefs_c_new(nodes_per_cell, dim);       // n+1
@@ -732,9 +744,13 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     TensorZ const       IdZ(Tensor::Identity(LZ,LZ));
     VectorXi            mapU_t(n_dofs_u_per_cell);
 
-    std::vector<bool>   SV(N_Solids,false);     //solid visited history
-    std::vector<int>    SV_c(nodes_per_cell,0); //maximum nodes in solid visited saving the solid tag
-    bool                SFI = false;            //solid-fluid interception
+    std::vector<bool>   SV(N_Solids,false);       //solid visited history
+    std::vector<int>    SV_c(nodes_per_cell,0);   //maximum nodes in solid visited saving the solid tag
+    bool                SFI = false;              //solid-fluid interception
+
+    std::vector<bool>   VS(N_Solids,false);       //slip visited history
+    std::vector<int>    VS_c(nodes_per_cell,0);   //maximum nodes in slip visited saving the solid tag
+    bool                VSF = false;              //slip velocity node detected
 
     Vector   RotfI(dim), RotfJ(dim), ConfI(dim), ConfJ(dim);
     Vector3d XIg, XJg;
@@ -779,22 +795,25 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       if (N_Solids){
         mapZ_c = -VectorXi::Ones(nodes_per_cell*LZ);
         mapU_t = -VectorXi::Ones(n_dofs_u_per_cell);
-        SFI = false;
+        SFI = false; VSF = false;
         for (int j = 0; j < nodes_per_cell; ++j){
           tag_c = mesh->getNodePtr(cell->getNodeId(j))->getTag();
           nod_id = is_in_id(tag_c,flusoli_tags);
           nod_is = is_in_id(tag_c,solidonly_tags);
-          if (nod_id || nod_is){
+          nod_vs = is_in_id(tag_c,slipvel_tags);
+          nodsum = nod_id+nod_is+nod_vs;
+          if (nodsum){
             for (int l = 0; l < LZ; l++){
-              mapZ_c(j*LZ + l) = n_unknowns_u + n_unknowns_p + LZ*(nod_id+nod_is) - LZ + l;
+              mapZ_c(j*LZ + l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum) - LZ + l;
             }
             for (int l = 0; l < dim; l++){
               mapU_t(j*dim + l) = mapU_c(j*dim + l);
               mapU_c(j*dim + l) = -1;
             }
             SFI = true;
+            if (nod_vs) VSF = true;
           }
-          SV_c[j]=nod_id;
+          SV_c[j] = nod_id+nod_vs; VS_c[j] = nod_vs;
         }
         //if (SFI) {cout << mapU_c.transpose() << "\n" << mapU_t.transpose() << endl;}
       }
@@ -816,6 +835,13 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         du_coefs_c_vold= MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
         u_coefs_c_om2  = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
         u_coefs_c_om2c = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
+      }
+
+      if (is_slipv){
+        vs_coefs_c_old = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
+        vs_coefs_c_new = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
+        vs_coefs_c_om1 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
+        if (is_bdf3) vs_coefs_c_om2 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
       }
       //v_coefs_c_mid = MatrixXd::Zero(nodes_per_cell,dim);
       //p_coefs_c_old = VectorXd::Zero(n_dofs_p_per_cell);
@@ -846,6 +872,14 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         if (N_Solids) VecGetValues(Vec_uzp_m2,  mapU_t.size(), mapU_t.data(), u_coefs_c_om2c.data()); // bdf3
       }
 
+      if (VSF){
+        VecGetValues(Vec_slipv_0,  mapU_t.size(), mapU_t.data(), vs_coefs_c_old.data()); // bdf2,bdf3
+        VecGetValues(Vec_slipv_1,  mapU_t.size(), mapU_t.data(), vs_coefs_c_new.data()); // bdf2,bdf3
+        VecGetValues(Vec_slipv_m1, mapU_t.size(), mapU_t.data(), vs_coefs_c_om1.data()); // bdf2,bdf3
+        if (is_bdf3)
+          VecGetValues(Vec_slipv_m2,  mapU_t.size(), mapU_t.data(), vs_coefs_c_om2.data()); // bdf3
+      }
+
       // get nodal coordinates of the old and new cell
       mesh->getCellNodesId(&*cell, cell_nodes.data());
       //mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
@@ -872,6 +906,16 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       x_coefs_c_mid_trans = utheta*x_coefs_c_new_trans + (1.-utheta)*x_coefs_c_old_trans;
       p_coefs_c_mid       = utheta*p_coefs_c_new       + (1.-utheta)*p_coefs_c_old;
       z_coefs_c_mid_trans = utheta*z_coefs_c_new_trans + (1.-utheta)*z_coefs_c_old_trans;
+
+      if (VSF){
+        vs_coefs_c_old_trans = vs_coefs_c_old.transpose();  //cout << u_coefs_c_old_trans << endl << endl;
+        vs_coefs_c_new_trans = vs_coefs_c_new.transpose();
+        vs_coefs_c_om1_trans = vs_coefs_c_om1.transpose();
+        if (is_bdf3)
+          vs_coefs_c_om2_trans = vs_coefs_c_om2.transpose();
+
+        vs_coefs_c_mid_trans = utheta*vs_coefs_c_new_trans + (1.-utheta)*vs_coefs_c_old_trans;
+      }
 
       visc = muu(tag);
       rho  = pho(Xqp,tag);
@@ -1031,17 +1075,17 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
               XJp_new = x_coefs_c_new_trans.col(J);
               XJp     = x_coefs_c_mid_trans.col(J);
               //for dUdt
-              z_coefs_c_auo.col(J) = SolidVel(XJp_old, XG_0[SV_c[J]-1], z_coefs_c_old_trans.col(J),dim);
-              z_coefs_c_aun.col(J) = SolidVel(XJp_new, XG_1[SV_c[J]-1], z_coefs_c_new_trans.col(J),dim);
+              z_coefs_c_auo.col(J) = SolidVel(XJp_old,XG_0[SV_c[J]-1],z_coefs_c_old_trans.col(J),dim);
+              z_coefs_c_aun.col(J) = SolidVel(XJp_new,XG_1[SV_c[J]-1],z_coefs_c_new_trans.col(J),dim);
               //for dxU
               uz_coefs_c.col(J)    = SolidVel(XJp,XG_mid[SV_c[J]-1],z_coefs_c_mid_trans.col(J),dim);
             }
           }
 
-          dxZ      = uz_coefs_c * dLphi_c[qp] * invF_c_mid;  //cout << dxZ << endl;
-          Zqp_new  = z_coefs_c_aun * phi_c[qp];              //cout << Zqp_new << endl;
-          Zqp_old  = z_coefs_c_auo * phi_c[qp];              //cout << Zqp_old << endl;
-          Zqp      = uz_coefs_c * phi_c[qp];                 //cout << Zqp << endl;
+          dxZ      = (uz_coefs_c + vs_coefs_c_mid_trans) * dLphi_c[qp] * invF_c_mid;  //cout << dxZ << endl;
+          Zqp_new  = (z_coefs_c_aun + vs_coefs_c_new_trans) * phi_c[qp];              //cout << Zqp_new << endl;
+          Zqp_old  = (z_coefs_c_auo + vs_coefs_c_old_trans) * phi_c[qp];              //cout << Zqp_old << endl;
+          Zqp      = (uz_coefs_c + vs_coefs_c_mid_trans) * phi_c[qp];                 //cout << Zqp << endl;
 
           dxU      += dxZ;                    //cout << dxU << endl;
           Uconv_qp += Zqp;
@@ -1483,7 +1527,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     VectorXi   mapZ_s(LZ);
     VectorXd   z_coefs_old(LZ), z_coefs_new(LZ), z_coefs_om1(LZ), z_coefs_om2(LZ);
     Vector     dZdt(LZ);
-    Vector     Grav(3*(dim-1)), Fpp(3*(dim-1)), Fpw(3*(dim-1));
+    Vector     Grav(LZ), Fpp(LZ), Fpw(LZ);
     TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ);
     TensorZ    MI = TensorZ::Zero(LZ,LZ);
     double ddt_factor;

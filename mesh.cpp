@@ -158,7 +158,7 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
   int               tag_0, tag_1, tag_2;
   bool              contrib_0, contrib_1, contrib_2;
   bool              virtual_mesh;
-  bool              is_surface, is_solid, is_cl, is_fsi;
+  bool              is_surface, is_solid, is_cl, is_fsi, is_slv;
   int               sign_;
   int               pts_id[15];
 
@@ -183,10 +183,11 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
     is_solid   = is_in(tag, solid_tags);
     is_cl      = is_in(tag, triple_tags);
     is_fsi     = is_in(tag, flusoli_tags);
+    is_slv     = is_in(tag, slipvel_tags);
 
-    if ( !(is_surface || is_solid || is_cl || mesh->inBoundary(&*facet) || is_fsi) )
+    if ( !(is_surface || is_solid || is_cl || mesh->inBoundary(&*facet) || is_fsi || is_slv) )
       continue;
-
+    //cout << tag << "  ";
     contrib_0 = true;
     contrib_1 = true;
     contrib_2 = true;
@@ -403,8 +404,9 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
     is_solid   = is_in(tag, solid_tags);
     is_cl      = is_in(tag, triple_tags);
     is_fsi     = is_in(tag, flusoli_tags);
+    is_slv     = is_in(tag, slipvel_tags);
 
-    if ( !(is_surface || is_solid || is_cl || mesh->inBoundary(&*point) || is_fsi) )
+    if ( !(is_surface || is_solid || is_cl || mesh->inBoundary(&*point) || is_fsi || is_slv) )
       continue;
 
     getNodeDofs(&*point, DH_MESH, VAR_M, map.data());

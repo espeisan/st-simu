@@ -125,7 +125,8 @@ Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double con
                  double ep, double zeta);
 TensorZ MI_tensor(double M, double R, int dim);
 Tensor RotM(double theta, int dim);
-Vector SlipVel(Vector const& XG, Vector const& X, int dim, int tag);
+Vector SlipVel(Vector const& X, Vector const& XG, int dim, int tag);
+Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag);
 
 inline double sqr(double v) {return v*v;}
 
@@ -446,6 +447,8 @@ public:
   void getSolidVolume();
   PetscErrorCode moveCenterMass(double vtheta);
   PetscErrorCode updateSolidMesh();
+  PetscErrorCode velNoSlip(Vec const& Vec_uzp, Vec const& Vec_sv, Vec &Vec_uzp_ns);
+  PetscErrorCode plotFiles();
   //void printContactAngle(bool _print);
 
   void computeError(Vec const& Vec_x, Vec &Vec_up_1, double tt);
@@ -499,6 +502,7 @@ public:
   PetscBool   is_bdf_euler_start;
   PetscBool   is_bdf_extrap_cte;
   PetscBool   is_basic;
+  PetscBool   is_slipv;
   
   int         converged_times;
   double      dt;
@@ -672,18 +676,22 @@ public:
   Vec                 Vec_duzp_0, Vec_uzp_m1, Vec_uzp_m2; // for bdf3
   Mat                 Mat_Jac_fs;//, Mat_Jac;
   SNES                snes_fs;//, snes;         /* nonlinear solver context */
-  KSP    			        ksp_fs;//ksp,
-  PC	   			        pc_fs;//pc,
+  KSP    			  ksp_fs;//ksp,
+  PC	   			  pc_fs;//pc,
 
   // mesh
   Mat                 Mat_Jac_m;
   SNES                snes_m;
-  KSP    			        ksp_m;
-  PC	   			        pc_m;
+  KSP    			  ksp_m;
+  PC	   			  pc_m;
   Vec                 Vec_res_m, Vec_x_0, Vec_x_1, Vec_v_mid, Vec_v_1;
   Vec                 Vec_x_aux; // bdf3
   SNESLineSearch      linesearch;
   
+  // slip velocity
+  Vec                 Vec_slipv_0, Vec_slipv_1, Vec_slipv_m1, Vec_slipv_m2;
+  Vec                 Vec_uzp_0_ns, Vec_uzp_1_ns;
+
 
   // For Luzia's methods
   double h_star, Q_star, beta_l, L_min, L_max, L_range, L_low, L_sup;

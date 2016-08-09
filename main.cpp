@@ -377,8 +377,6 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
 	flusoli_tags.resize(nmax);
   else
 	flusoli_tags.clear();
-  N_Solids = flusoli_tags.size();
-  LZ = 3*(dim-1);
 
   fluidonly_tags.resize(16);  //cout << flusol_tags.max_size() << endl;
   nmax = fluidonly_tags.size();
@@ -395,14 +393,16 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
     solidonly_tags.resize(nmax);
   else
     solidonly_tags.clear();
+  N_Solids = solidonly_tags.size();
+  LZ = dim*(dim+1)/2; //3*(dim-1);
 
   slipvel_tags.resize(16);
   nmax = slipvel_tags.size();
   PetscOptionsGetIntArray(PETSC_NULL, "-slipv_tags", slipvel_tags.data(), &nmax, &flg_tags);
   if (flg_tags)
-    slipvel_tags.resize(nmax);
+    {slipvel_tags.resize(nmax); is_slipv = PETSC_TRUE;}
   else
-    slipvel_tags.clear();
+    {slipvel_tags.clear(); is_slipv = PETSC_FALSE;}
 
   PetscOptionsEnd();   //Finish PetscOptions*
 
@@ -904,6 +904,48 @@ PetscErrorCode AppCtx::allocPetscObjs()
   ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
   ierr = VecSetFromOptions(Vec_res_m);                           CHKERRQ(ierr);
 
+  if (is_slipv)
+  {
+    //Vec Vec_slipvel_0;
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slipv_0);               CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_slipv_0, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_slipv_0);                          CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slipv_0, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    //Vec Vec_slipvel_1;
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slipv_1);               CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_slipv_1, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_slipv_1);                          CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slipv_1, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    //Vec Vec_slipvel_m1;
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slipv_m1);               CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_slipv_m1, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_slipv_m1);                          CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slipv_m1, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    if (is_bdf3)
+    {
+      //Vec Vec_slipvel_m2;
+      ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slipv_m2);               CHKERRQ(ierr);
+      ierr = VecSetSizes(Vec_slipv_m2, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+      ierr = VecSetFromOptions(Vec_slipv_m2);                          CHKERRQ(ierr);
+      ierr = VecSetOption(Vec_slipv_m2, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+    }
+
+    //Vec Vec_uzp_0_ns;
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_uzp_0_ns);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_uzp_0_ns, PETSC_DECIDE, n_unknowns_fs);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_uzp_0_ns);                                 CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_uzp_0_ns, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    //Vec Vec_uzp_1;
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_uzp_1_ns);                       CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_uzp_1_ns, PETSC_DECIDE, n_unknowns_fs);           CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_uzp_1_ns);                                  CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_uzp_1_ns, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+  }
+
   std::vector<int> nnz;
 
   //  ------------------------------------------------------------------
@@ -1368,33 +1410,46 @@ PetscErrorCode AppCtx::setInitialConditions()
 {
   PetscErrorCode      ierr(0);
 
-  Vector    Uf(dim), Zf(LZ);
+  Vector    Uf(dim), Zf(LZ), Vs(dim), Nr(dim);
   Vector    X(dim);
   Tensor    R(dim,dim);
-  VectorXi  dofs(dim);  //global components unknowns enumeration from point dofs
+  VectorXi  dofs(dim), dofs_mesh(dim);  //global components unknowns enumeration from point dofs
   VectorXi  dofs_fs(LZ);
   Vector3d  Xg, XG_temp, Us;
-  int       nod_id, nod_is, tag;
+  int       nod_id, nod_is, tag, nod_vs, nodsum;
 
   VecZeroEntries(Vec_v_mid);  //this size(V) = size(X) = size(U)
+  VecZeroEntries(Vec_v_1);
   VecZeroEntries(Vec_x_0);
   VecZeroEntries(Vec_x_1);
   VecZeroEntries(Vec_normal);
   VecZeroEntries(Vec_res_fs); //this size is the [U,P,Z] sol vec size
   VecZeroEntries(Vec_uzp_0);
   VecZeroEntries(Vec_uzp_1);
-  VecZeroEntries(Vec_duzp);
   VecZeroEntries(Vec_uzp_m1);
+  VecZeroEntries(Vec_duzp); //borrar
   if (is_bdf3){
-    VecZeroEntries(Vec_duzp_0);
     VecZeroEntries(Vec_x_aux);
     VecZeroEntries(Vec_uzp_m2);
+    VecZeroEntries(Vec_duzp_0); //borrar
   }
+  if (is_slipv){
+    VecZeroEntries(Vec_slipv_0);
+    VecZeroEntries(Vec_slipv_1);
+    VecZeroEntries(Vec_slipv_m1);
+    if (is_bdf3){
+      VecZeroEntries(Vec_slipv_m2);
+    }
+    VecZeroEntries(Vec_uzp_0_ns);
+    VecZeroEntries(Vec_uzp_1_ns);
+  }
+
   copyMesh2Vec(Vec_x_0);  //copy initial mesh coordinates to Vec_x_0 = (a1,a2,a3,b1,b2,b3,c1,c2,c3,...)
   copyMesh2Vec(Vec_x_1);  //copy initial mesh coordinates to Vec_x_1
 
   // normals at boundary points (n01,n02,n03, n11,n12,n13, n21,n22,n23, ..., 0) following node order .geo
   getVecNormals(&Vec_x_0, Vec_normal);  //std::cout << VecView(Vec_normal,PETSC_VIEWER_STDOUT_WORLD)
+  //Assembly(Vec_normal);  View(Vec_normal,"matrizes/nrm.m","nrmm");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
 
   // compute mesh sizes
   {
@@ -1455,40 +1510,55 @@ PetscErrorCode AppCtx::setInitialConditions()
     {
       getNodeDofs(&*point,DH_UNKM,VAR_P,dofs.data());
       double p_in = p_initial(X, tag);
-      VecSetValues(Vec_uzp_0, 1, dofs.data(), &p_in, INSERT_VALUES);
+      VecSetValues(Vec_uzp_0,1,dofs.data(),&p_in,INSERT_VALUES);
+      VecSetValues(Vec_uzp_1,1,dofs.data(),&p_in,INSERT_VALUES);
     }
 
     // vel
+    getNodeDofs(&*point, DH_UNKM, VAR_U, dofs.data());
     nod_id = is_in_id(tag,flusoli_tags);
     nod_is = is_in_id(tag,solidonly_tags);
-    if (nod_id || nod_is){
+    nod_vs = is_in_id(tag,slipvel_tags);
+    nodsum = nod_id+nod_is+nod_vs;
+    if (nodsum){
       Zf = z_initial(X, tag);
-      Uf = SolidVel(X, XG_0[nod_id+nod_is-1], Zf, dim);
-      getNodeDofs(&*point,DH_UNKM,VAR_U,dofs.data());
+      Uf = SolidVel(X, XG_0[nodsum-1], Zf, dim);
+      VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
+      if (nod_vs){
+        getNodeDofs(&*point, DH_MESH, VAR_M, dofs_mesh.data());
+        VecGetValues(Vec_normal, dim, dofs_mesh.data(), Nr.data());
+        Vs = SlipVel(X, XG_0[nod_vs-1], Nr, dim, tag);
+        VecSetValues(Vec_slipv_0, dim, dofs_mesh.data(), Vs.data(), INSERT_VALUES);
+        Uf = Uf + Vs;  //cout << tag << "  " << X(0)-3 << " " << X(1)-3<< "  " << Uf.transpose() << endl;
+      }
       VecSetValues(Vec_uzp_0, dim, dofs.data(), Uf.data(), INSERT_VALUES);
-      if (!SV[nod_id+nod_is-1]){
+      if (!SV[nodsum-1]){
         for (int l = 0; l < LZ; l++){
-          dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nod_id+nod_is) - LZ + l;
+          dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum) - LZ + l;
         }
         VecSetValues(Vec_uzp_0, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);  //cout << dofs_fs.transpose() << endl;
-        Xg = XG_0[nod_id+nod_is-1];
+        VecSetValues(Vec_uzp_1, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);
+        Xg = XG_0[nodsum-1];
         Xg(0) = Xg(0)+dt*Zf(0); Xg(1) = Xg(1)+dt*Zf(1); if (dim == 3){Xg(2) = Xg(2)+dt*Zf(2);}
-        XG_1[nod_id+nod_is-1] = Xg;
-        theta_1[nod_id+nod_is-1] = theta_0[nod_id+nod_is-1] + dt*Zf(2);
-        SV[nod_id+nod_is-1] = true;
+        XG_1[nodsum-1] = Xg;
+        theta_1[nodsum-1] = theta_0[nodsum-1] + dt*Zf(2);
+        SV[nodsum-1] = true;
       }
     }
     else{
       Uf = u_initial(X, tag);
-      getNodeDofs(&*point,DH_UNKM,VAR_U,dofs.data());
       VecSetValues(Vec_uzp_0, dim, dofs.data(), Uf.data(), INSERT_VALUES);  //cout << dofs.transpose() << endl;
+      VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
     }
 
   } // end point loop
 
-  Assembly(Vec_uzp_0);  //View(Vec_uzp_0,"matrizes/vuzp.m","vuzpm");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
-  VecCopy(Vec_uzp_0,Vec_uzp_1);  //PetscInt size1; //u_unk+z_unk+p_unk //VecGetSize(Vec_up_0,&size1);
-
+  //Assembly(Vec_uzp_0);  View(Vec_uzp_0,"matrizes/vuzp0.m","vuzp0m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
+  //Assembly(Vec_uzp_1);  View(Vec_uzp_1,"matrizes/vuzp1.m","vuzp1m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
+  //Assembly(Vec_slipv_0);  View(Vec_slipv_0,"matrizes/slip0.m","slipm");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
+//  VecCopy(Vec_uzp_0,Vec_uzp_1);  //PetscInt size1; //u_unk+z_unk+p_unk //VecGetSize(Vec_up_0,&size1);
+  VecCopy(Vec_slipv_0, Vec_slipv_1);
+  //plotFiles();
   // remember: Vec_normals follows the Vec_x_1
   calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, 0.0); //Vec_up_0 = Vec_up_1, vtheta = 1.0, mean b.c. = Vec_up_1 = Vec_v_mid init. guess SNESSolve
   // move the mesh
@@ -1496,6 +1566,12 @@ PetscErrorCode AppCtx::setInitialConditions()
   if (N_Solids) updateSolidMesh();
   //VecView(Vec_v_mid,PETSC_VIEWER_STDOUT_WORLD); //VecView(Vec_x_0,PETSC_VIEWER_STDOUT_WORLD); VecView(Vec_x_1,PETSC_VIEWER_STDOUT_WORLD);
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
+
+  if (is_mr_ab){
+    //copyVec2Mesh(Vec_x_1);
+    //plotFiles();
+    PetscFunctionReturn(0);
+  }
 
   if (is_basic){
     if (N_Solids){moveCenterMass(0.0);}
@@ -1521,7 +1597,7 @@ PetscErrorCode AppCtx::setInitialConditions()
         // * SOLVE THE SYSTEM *
 
         // update
-        if (ale)
+        if (ale && m==0)
         {
           //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
@@ -1705,7 +1781,6 @@ PetscErrorCode AppCtx::setUPInitialGuess()
   int         tag;
   Vector      X1(dim);
   Vector      U1(dim);
-  bool        already = false;
 
   point_iterator point = mesh->pointBegin();
   point_iterator point_end = mesh->pointEnd();
@@ -1722,16 +1797,8 @@ PetscErrorCode AppCtx::setUPInitialGuess()
     {
       U1 = u_exact(X1, current_time+dt, tag);  //current_time+dt 'cause we want U^{n+1}
       VecSetValues(Vec_uzp_1, dim, u_dofs_fs.data(), U1.data(), INSERT_VALUES);
-
-      if (already){
-        getNodeDofs(&*point,DH_UNKM,VAR_P,p_dofs.data());
-        double p_in = 0.0;
-        VecSetValues(Vec_uzp_1, 1, p_dofs.data(), &p_in, INSERT_VALUES);
-        already = false;
-      }
     }
-    else
-    if (is_in(tag, solid_tags) || is_in(tag, feature_tags) || is_in(tag, triple_tags))
+    else if (is_in(tag, solid_tags) || is_in(tag, feature_tags) || is_in(tag, triple_tags))
     {
       U1.setZero();
       VecSetValues(Vec_uzp_1, dim, u_dofs_fs.data(), U1.data(), INSERT_VALUES);
@@ -1813,6 +1880,25 @@ PetscErrorCode AppCtx::solveTimeProblem()
     }
 
     VecCopy(Vec_uzp_1, Vec_uzp_0);
+  }
+
+  if (is_mr_ab && false){
+    current_time += dt;
+    time_step += 1;
+
+    // extrapolated geometry
+    VecScale(Vec_x_1, 2.0);         // look inside residue why this extrap is used
+    VecAXPY(Vec_x_1,-1.0,Vec_x_0);  // \bar{X}^(n+1/2)=2.0*X^(n)-1.0X^(n-1)
+    //VecScale(Vec_x_1, 1.5);
+    //VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
+    copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+    calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
+    VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
+    if (N_Solids){
+      moveCenterMass(1.5);
+      VecCopy(Vec_slipv_1,Vec_slipv_0);
+      updateSolidMesh();
+    }
   }
 
   //print solid's center information
@@ -1958,32 +2044,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
     {
       if (family_files)
       {
-        double  *q_array;
-        double  *nml_array;
-        double  *v_array;
-        VecGetArray(Vec_uzp_0, &q_array);  //VecGetArray(Vec_up_0, &q_array);
-        VecGetArray(Vec_normal, &nml_array);
-        VecGetArray(Vec_v_mid, &v_array);
-        vtk_printer.writeVtk();
-
-        /* ---- nodes data ---- */
-        vtk_printer.addNodeVectorVtk("u", GetDataVelocity(q_array, *this));
-        //vtk_printer.addNodeVectorVtk("normal",  GetDataNormal(nml_array, *this));
-        vtk_printer.addNodeVectorVtk("v",  GetDataMeshVel(v_array, *this));
-        vtk_printer.printPointTagVtk();
-
-        if (!shape_psi_c->discontinuous())
-          vtk_printer.addNodeScalarVtk("pressure", GetDataPressure(q_array, *this));
-        else
-          vtk_printer.addCellScalarVtk("pressure", GetDataPressCellVersion(q_array, *this));
-
-        vtk_printer.addCellIntVtk("cell_tag", GetDataCellTag(*this));
-
-        //vtk_printer.printPointTagVtk("point_tag");
-        VecRestoreArray(Vec_uzp_0, &q_array);  //VecRestoreArray(Vec_up_0, &q_array);
-        VecRestoreArray(Vec_normal, &nml_array);
-        VecRestoreArray(Vec_v_mid, &v_array);
-
+        plotFiles();
         ierr = SNESGetIterationNumber(snes_fs,&its);     CHKERRQ(ierr);
         cout << "num snes iterations: " << its << endl;
       }
@@ -2111,10 +2172,13 @@ PetscErrorCode AppCtx::solveTimeProblem()
         //VecScale(Vec_x_1, 1.5);
         //VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+        velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);
+        velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
         if (N_Solids){
           moveCenterMass(1.5);
+          VecCopy(Vec_slipv_1,Vec_slipv_0);
           updateSolidMesh();
         }
       }
@@ -2875,9 +2939,9 @@ PetscErrorCode AppCtx::updateSolidVel()
   VectorXi  dofs(dim), mapM_r(dim);
   VectorXi  dofs_fs(LZ);
   Vector    X(dim);
-  Vector    Uf(dim), Zf(LZ);
+  Vector    Uf(dim), Zf(LZ), Vs(dim);
   Vector3d  Xg;
-  int       nod_id, nod_is;
+  int       nod_id, nod_is, nod_vs, nodsum;
   int       tag;
   std::vector<bool>   SV(N_Solids,false);  //solid visited history
 
@@ -2891,9 +2955,11 @@ PetscErrorCode AppCtx::updateSolidVel()
     // vel
     nod_id = is_in_id(tag,flusoli_tags);
     nod_is = is_in_id(tag,solidonly_tags);
-    if (nod_id || nod_is){
+    nod_vs = is_in_id(tag,slipvel_tags);
+    nodsum = nod_id+nod_is+nod_vs;
+    if (nodsum){
       for (int l = 0; l < LZ; l++){
-        dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nod_id+nod_is) - LZ + l;
+        dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum) - LZ + l;
       }
       dof_handler[DH_UNKM].getVariable(VAR_U).getVertexDofs(mapM_r.data(),&*point);
       //VecGetValues(Vec_x_0, mapM_r.size(), mapM_r.data(), X.data());
@@ -2906,7 +2972,12 @@ PetscErrorCode AppCtx::updateSolidVel()
         Xg(0) = Xg(0)+dt*Zf(0); Xg(1) = Xg(1)+dt*Zf(1); if (dim == 3){Xg(2) = Xg(2)+dt*Zf(2);}
         XG[nod_id+nod_is-1] = Xg;  SV[nod_id+nod_is-1] = true;
       }*/
-      Uf = SolidVel(X, XG_1[nod_id+nod_is-1], Zf, dim);
+      Uf = SolidVel(X, XG_1[nodsum-1], Zf, dim);
+      if (nod_vs){
+        getNodeDofs(&*point, DH_MESH, VAR_M, dofs.data());
+        VecGetValues(Vec_slipv_1, dim, dofs.data(), Vs.data());
+        Uf = Uf + Vs;  //cout << tag << "  " << X(0)-3 << " " << X(1)-3<< "  " << Uf.transpose() << endl;
+      }
       //cout << dofs_fs.transpose() << ", " << X.transpose() << ", " << XG_0[nod_id+nod_is-1].transpose() << ", " << Zf.transpose() << ", "<< Uf.transpose() << endl;
       getNodeDofs(&*point,DH_UNKM,VAR_U,dofs.data());
       VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
@@ -2936,7 +3007,7 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
     VecGetValues(Vec_uzp_0, 1, dof.data(), theta0.data());
     VecGetValues(Vec_uzp_1, 1, dof.data(), theta1.data());
 
-    if (is_bdf3){
+    if (is_bdf3 && time_step > 1){
       XG_temp   = XG_1[s];
       XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*U0;
       XG_aux[s] = XG_0[s];
@@ -2946,7 +3017,7 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
       theta_aux[s] = theta_0[s];
       theta_0[s]   = theta_temp;
     }
-    else if (is_bdf2){
+    else if (is_bdf2 && time_step > 0){
       if (is_bdf2_bdfe){
         XG_temp = XG_1[s];
         XG_1[s] = (4./3.)*XG_1[s] - (1./3.)*XG_0[s] + (2./3.)*dt*(vtheta*U1 + (1.-vtheta)*U0);
@@ -2964,13 +3035,19 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
         theta_0[s] = theta_temp;
       }
     }
-    else{  //for MR-AB and basic
-      XG_temp = XG_1[s];
-      XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
-      XG_0[s] = XG_temp;
-      theta_temp = theta_1[s];
-      theta_1[s] = dt*(vtheta*theta1(0) + (1.-vtheta)*theta0(0)) + theta_0[s];
-      theta_0[s] = theta_temp;
+    else{  //for MR-AB and basic, and for all at time = t0
+      if (time_step == 0){
+        XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
+        theta_1[s] = dt*(vtheta*theta1(0) + (1.-vtheta)*theta0(0)) + theta_0[s];
+      }
+      else{
+        XG_temp = XG_1[s];
+        XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
+        XG_0[s] = XG_temp;
+        theta_temp = theta_1[s];
+        theta_1[s] = dt*(vtheta*theta1(0) + (1.-vtheta)*theta0(0)) + theta_0[s];
+        theta_0[s] = theta_temp;
+      }
     }
 
   }
@@ -2979,9 +3056,9 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
 
 PetscErrorCode AppCtx::updateSolidMesh()
 {
-  int tag, nod_id, nod_is;
+  int tag, nod_id, nod_is, nod_vs, nodsum;
   VectorXi  dofs(dim);
-  Vector    X0(Vector::Zero(3));
+  Vector    X0(Vector::Zero(3)), Vs(Vector::Zero(3));
 
   point_iterator point = mesh->pointBegin();
   point_iterator point_end = mesh->pointEnd();
@@ -2991,14 +3068,78 @@ PetscErrorCode AppCtx::updateSolidMesh()
 
     nod_id = is_in_id(tag,flusoli_tags);
     nod_is = is_in_id(tag,solidonly_tags);
-
-    if (nod_id || nod_is){
-      getNodeDofs(&*point, DH_UNKM, VAR_M, dofs.data());
+    nod_vs = is_in_id(tag,slipvel_tags);
+    nodsum = nod_id+nod_is+nod_vs;
+    if (nodsum){
+      getNodeDofs(&*point, DH_MESH, VAR_M, dofs.data());
       VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X0.data());
-      X0 = RotM(theta_1[nod_id+nod_is-1]-theta_0[nod_id+nod_is-1],dim)*(X0 - XG_0[nod_id+nod_is-1]) + XG_1[nod_id+nod_is-1];
+      X0 = RotM(theta_1[nodsum-1]-theta_0[nodsum-1],dim)*(X0 - XG_0[nodsum-1]) + XG_1[nodsum-1];// - XG_0[nodsum-1];
       VecSetValues(Vec_x_1, dofs.size(), dofs.data(), X0.data(), INSERT_VALUES);
+      nod_vs = is_in_id(tag,slipvel_tags);
+      if (nod_vs){
+        VecGetValues(Vec_slipv_0, dim, dofs.data(), Vs.data());
+        Vs = RotM(theta_1[nod_vs-1]-theta_0[nod_vs-1],dim)*Vs;// + XG_1[nod_id+nod_is-1]; // - XG_0[nod_id+nod_is-1];
+        VecSetValues(Vec_slipv_1, dim, dofs.data(), Vs.data(), INSERT_VALUES);
+      }
     }
   }
+  PetscFunctionReturn(0);
+}
+
+PetscErrorCode AppCtx::velNoSlip(Vec const& Vec_uzp, Vec const& Vec_sv, Vec &Vec_uzp_ns)
+{
+  int tag;
+  VectorXi dofs(dim), dofs_mesh(dim);
+  Vector   U(dim), Uns(dim);
+
+  point_iterator point = mesh->pointBegin();
+  point_iterator point_end = mesh->pointEnd();
+  for (; point != point_end; ++point)  //to calculate Vec_v_mid at each point (initial guess)
+  {
+    tag = point->getTag();
+    if (is_in(tag,slipvel_tags)){
+      getNodeDofs(&*point, DH_UNKM, VAR_U, dofs.data());
+      getNodeDofs(&*point, DH_MESH, VAR_M, dofs_mesh.data());
+      VecGetValues(Vec_uzp,  dim, dofs.data(), U.data());
+      VecGetValues(Vec_sv,  dim, dofs_mesh.data(), Uns.data());
+      Uns = U - Uns;
+      VecSetValues(Vec_uzp_ns, dim, dofs.data(), Uns.data(), INSERT_VALUES);
+    }
+  }
+  PetscFunctionReturn(0);
+}
+
+PetscErrorCode AppCtx::plotFiles()
+{
+  double  *q_array;
+  double  *nml_array;
+  double  *v_array, *vs_array;;
+  VecGetArray(Vec_uzp_0, &q_array);  //VecGetArray(Vec_up_0, &q_array);
+  VecGetArray(Vec_normal, &nml_array);
+  VecGetArray(Vec_v_mid, &v_array);
+  VecGetArray(Vec_slipv_0, &vs_array);
+  vtk_printer.writeVtk();
+
+  /* ---- nodes data ---- */
+  vtk_printer.addNodeVectorVtk("u", GetDataVelocity(q_array, *this));
+  vtk_printer.addNodeVectorVtk("n", GetDataNormal(nml_array, *this));
+  vtk_printer.addNodeVectorVtk("v", GetDataMeshVel(v_array, *this));
+  vtk_printer.addNodeVectorVtk("vs", GetDataMeshVel(vs_array, *this));
+  vtk_printer.printPointTagVtk();
+
+  if (!shape_psi_c->discontinuous())
+    vtk_printer.addNodeScalarVtk("p", GetDataPressure(q_array, *this));
+  else
+    vtk_printer.addCellScalarVtk("p", GetDataPressCellVersion(q_array, *this));
+
+  vtk_printer.addCellIntVtk("cell_tag", GetDataCellTag(*this));
+
+  //vtk_printer.printPointTagVtk("point_tag");
+  VecRestoreArray(Vec_uzp_0, &q_array);  //VecRestoreArray(Vec_up_0, &q_array);
+  VecRestoreArray(Vec_normal, &nml_array);
+  VecRestoreArray(Vec_v_mid, &v_array);
+  VecRestoreArray(Vec_slipv_0, &vs_array);
+
   PetscFunctionReturn(0);
 }
 
@@ -3028,12 +3169,24 @@ void AppCtx::freePetscObjs()
     Destroy(Vec_duzp_0);
     Destroy(Vec_uzp_m2);
   }
+  if (is_slipv){
+    Destroy(Vec_slipv_0);
+    Destroy(Vec_slipv_1);
+    Destroy(Vec_slipv_m1);
+    if (is_bdf3)
+      Destroy(Vec_slipv_m2);
+  }
 }
 
 void GetDataVelocity::get_vec(int id, Real * vec_out) const
 {
   Point const* point = user.mesh->getNodePtr(id);
   std::vector<int> dofs(user.dim);
+
+  user.getNodeDofs(&*point, DH_UNKM, VAR_U, dofs.data());
+  for (int i = 0; i < user.dim; ++i)
+    vec_out[i] = q_array[*(dofs.data()+i)];
+ /*
   int tag = point->getTag();
   int nod_id = is_in_id(tag,user.flusoli_tags);
   int nod_is = is_in_id(tag,user.solidonly_tags);
@@ -3055,7 +3208,7 @@ void GetDataVelocity::get_vec(int id, Real * vec_out) const
     for (int i = 0; i < user.dim; ++i)
       vec_out[i] = q_array[*(dofs.data()+i)];
   }
-
+*/
 }
 
 double GetDataPressure::get_data_r(int nodeid) const
