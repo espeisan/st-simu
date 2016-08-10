@@ -1534,7 +1534,7 @@ PetscErrorCode AppCtx::setInitialConditions()
       VecSetValues(Vec_uzp_0, dim, dofs.data(), Uf.data(), INSERT_VALUES);
       if (!SV[nodsum-1]){
         for (int l = 0; l < LZ; l++){
-          dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum) - LZ + l;
+          dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum-1) + l;
         }
         VecSetValues(Vec_uzp_0, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);  //cout << dofs_fs.transpose() << endl;
         VecSetValues(Vec_uzp_1, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);
@@ -1557,7 +1557,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   //Assembly(Vec_uzp_1);  View(Vec_uzp_1,"matrizes/vuzp1.m","vuzp1m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
   //Assembly(Vec_slipv_0);  View(Vec_slipv_0,"matrizes/slip0.m","slipm");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
 //  VecCopy(Vec_uzp_0,Vec_uzp_1);  //PetscInt size1; //u_unk+z_unk+p_unk //VecGetSize(Vec_up_0,&size1);
-  VecCopy(Vec_slipv_0, Vec_slipv_1);
+  //VecCopy(Vec_slipv_0, Vec_slipv_1);
   //plotFiles();
   // remember: Vec_normals follows the Vec_x_1
   calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, 0.0); //Vec_up_0 = Vec_up_1, vtheta = 1.0, mean b.c. = Vec_up_1 = Vec_v_mid init. guess SNESSolve
@@ -1567,7 +1567,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   //VecView(Vec_v_mid,PETSC_VIEWER_STDOUT_WORLD); //VecView(Vec_x_0,PETSC_VIEWER_STDOUT_WORLD); VecView(Vec_x_1,PETSC_VIEWER_STDOUT_WORLD);
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
 
-  if (is_mr_ab){
+  if (false && is_mr_ab){
     //copyVec2Mesh(Vec_x_1);
     //plotFiles();
     PetscFunctionReturn(0);
@@ -2178,7 +2178,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
         if (N_Solids){
           moveCenterMass(1.5);
-          VecCopy(Vec_slipv_1,Vec_slipv_0);
+          if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
           updateSolidMesh();
         }
       }
@@ -3117,14 +3117,14 @@ PetscErrorCode AppCtx::plotFiles()
   VecGetArray(Vec_uzp_0, &q_array);  //VecGetArray(Vec_up_0, &q_array);
   VecGetArray(Vec_normal, &nml_array);
   VecGetArray(Vec_v_mid, &v_array);
-  VecGetArray(Vec_slipv_0, &vs_array);
+  if (is_slipv) VecGetArray(Vec_slipv_0, &vs_array);
   vtk_printer.writeVtk();
 
   /* ---- nodes data ---- */
   vtk_printer.addNodeVectorVtk("u", GetDataVelocity(q_array, *this));
   vtk_printer.addNodeVectorVtk("n", GetDataNormal(nml_array, *this));
   vtk_printer.addNodeVectorVtk("v", GetDataMeshVel(v_array, *this));
-  vtk_printer.addNodeVectorVtk("vs", GetDataMeshVel(vs_array, *this));
+  if (is_slipv) vtk_printer.addNodeVectorVtk("vs", GetDataMeshVel(vs_array, *this));
   vtk_printer.printPointTagVtk();
 
   if (!shape_psi_c->discontinuous())
@@ -3138,7 +3138,7 @@ PetscErrorCode AppCtx::plotFiles()
   VecRestoreArray(Vec_uzp_0, &q_array);  //VecRestoreArray(Vec_up_0, &q_array);
   VecRestoreArray(Vec_normal, &nml_array);
   VecRestoreArray(Vec_v_mid, &v_array);
-  VecRestoreArray(Vec_slipv_0, &vs_array);
+  if (is_slipv) VecRestoreArray(Vec_slipv_0, &vs_array);
 
   PetscFunctionReturn(0);
 }
