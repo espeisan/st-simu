@@ -473,7 +473,7 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
             is_in(tag,periodic_tags)  ||
             is_in(tag,flusoli_tags)   ||
             is_in(tag,solidonly_tags) ||
-            is_in(tag,slipvel_tags)))
+            is_in(tag,slipvel_tags)   ))
         continue;
       //dof_handler[DH_UNKS].getVariable(VAR_U).getVertexAssociatedDofs(v_dofs, &*point);
       getNodeDofs(&*point, DH_MESH, VAR_M, v_dofs);
@@ -799,12 +799,12 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         for (int j = 0; j < nodes_per_cell; ++j){
           tag_c = mesh->getNodePtr(cell->getNodeId(j))->getTag();
           nod_id = is_in_id(tag_c,flusoli_tags);
-          nod_is = is_in_id(tag_c,solidonly_tags);
+          nod_is = is_in_id(tag_c,solidonly_tags);  //always zero: look the previous if condition
           nod_vs = is_in_id(tag_c,slipvel_tags);
           nodsum = nod_id+nod_is+nod_vs;
           if (nodsum){
             for (int l = 0; l < LZ; l++){
-              mapZ_c(j*LZ + l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum) - LZ + l;
+              mapZ_c(j*LZ + l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum-1) + l;
             }
             for (int l = 0; l < dim; l++){
               mapU_t(j*dim + l) = mapU_c(j*dim + l);
@@ -843,6 +843,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         vs_coefs_c_om1 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
         if (is_bdf3) vs_coefs_c_om2 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
       }
+      vs_coefs_c_mid_trans = MatrixXd::Zero(dim,nodes_per_cell);
+      vs_coefs_c_old_trans = MatrixXd::Zero(dim,nodes_per_cell);
+      vs_coefs_c_new_trans = MatrixXd::Zero(dim,nodes_per_cell);
       //v_coefs_c_mid = MatrixXd::Zero(nodes_per_cell,dim);
       //p_coefs_c_old = VectorXd::Zero(n_dofs_p_per_cell);
       //p_coefs_c_new = VectorXd::Zero(n_dofs_p_per_cell);
@@ -954,6 +957,8 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
             if (SV_c[J]){
               XJp_old = x_coefs_c_old_trans.col(J);
               uz_coefs_c_old.col(J) = SolidVel(XJp_old,XG_0[SV_c[J]-1],z_coefs_c_old_trans.col(J),dim);
+              if (VS_c[J])
+                uz_coefs_c_old.col(J) += vs_coefs_c_old_trans.col(J);
             }
           }
         }

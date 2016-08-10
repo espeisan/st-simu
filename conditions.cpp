@@ -1066,7 +1066,7 @@ double muu(int tag)
 {
 //  if (tag == 15)
 //  {
-    return 1.0;//1.0*0.1;
+    return 0.0;//1.0*0.1;
 //  }
 //  else
 //  {
@@ -1125,7 +1125,7 @@ Vector z_exact(Vector const& X, double t, int tag)
   double w2 = 2.0;
   int dim = X.size();
   int LZ = 3*(dim-1);
-  Vector v(Vector::Zero(LZ)); v << 0.0, 0.0, 1.0;
+  Vector v(Vector::Zero(LZ)); v << 0.0, 0.0, 5.0;
   //if (t > 0){
   //  v(2) = w2;
   //}
