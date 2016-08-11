@@ -2557,7 +2557,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
         tag_b = mesh->getNodePtr(edge_nodes[1])->getTag();
         tag_e = edge->getTag();
 
-        if (is_in(tag_e, solidonly_tags))
+        if (is_in(tag_e, solidonly_tags) || is_in(tag_e, flusoli_tags) || is_in(tag_e, slipvel_tags))
           continue;
         if ((is_in(tag_e, flusoli_tags) || is_in(tag_e, solidonly_tags)) && (!is_splitting))
           continue;
@@ -2651,6 +2651,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
   Destroy(Vec_res_m);
   Destroy(Vec_normal);
   Destroy(Vec_v_mid);
+  Destroy(Vec_v_1);
   SNESReset(snes_fs);
   SNESReset(snes_m);
   KSPReset(ksp_fs);
@@ -2670,17 +2671,27 @@ PetscErrorCode AppCtx::meshAdapt_s()
     dofsUpdate();  //updates DH_ information: # variables u, z, p, mesh can change
     cout << "#z=" << n_nodes_fsi << " #u=" << n_unknowns_u << " #p=" << n_unknowns_p << " #v=" << n_dofs_v_mesh  << endl;
 
-    Vec *petsc_vecs[] = {&Vec_uzp_0, &Vec_uzp_1, &Vec_x_0, &Vec_x_1, &Vec_duzp, &Vec_v_1, &Vec_duzp_0, &Vec_x_aux};
-    int DH_t[]        = {DH_UNKM, DH_UNKM, DH_MESH, DH_MESH, DH_UNKM, DH_MESH, DH_UNKM, DH_MESH};
-    int n_unks_t[]    = {n_unknowns_fs, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh};
+    Vec *petsc_vecs[] = {&Vec_uzp_0,    &Vec_uzp_1,    &Vec_x_0,      &Vec_x_1,      &Vec_uzp_m1,   &Vec_x_aux,    &Vec_uzp_m2,   &Vec_slipv_0,  &Vec_slipv_1,  &Vec_slipv_m1, &Vec_slipv_m2};
+    int DH_t[]        = {DH_UNKM,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_MESH,       DH_MESH      };
+    int n_unks_t[]    = {n_unknowns_fs, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh};
     int L = 4;
-    if(is_bdf2){L = 6;}
-    else if (is_bdf3){L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
+    if (is_slipv){L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
+    else{
+      if(is_bdf2){L = 5;}
+      else if (is_bdf3){L = 7;}//{L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
+    }
     std::vector<Real> temp;
-    //cout << static_cast<int>( sizeof(DH_t)/sizeof(int) ) << endl;  // es 4 = size(DH_t)
+
     // NOTE: the mesh must not be changed in this loop
     for (int v = 0; v < L; ++v)
     {
+      if (is_slipv){
+        if ((is_mr_ab || is_basic) && (v == 4 || v == 5 || v == 6 || v == 9 || v == 10))
+          continue;
+        else if (is_bdf2 && (v == 5 || v == 6 || v == 10))
+          continue;
+      }
+
       int vsize;
       VecGetSize(*petsc_vecs[v], &vsize);  //size of Vec_uzp_0, Vec_uzp_1, Vec_x_0, Vec_x_1 (old mesh)
       temp.assign(vsize, 0.0);
@@ -2695,8 +2706,8 @@ PetscErrorCode AppCtx::meshAdapt_s()
       ierr = VecCreate(PETSC_COMM_WORLD, petsc_vecs[v]);                              CHKERRQ(ierr);
       ierr = VecSetSizes(*petsc_vecs[v], PETSC_DECIDE, n_unks_t[v]);                  CHKERRQ(ierr);  //dof_handler[DH_t[v]].numDofs()
       ierr = VecSetFromOptions(*petsc_vecs[v]);                                       CHKERRQ(ierr);
-      if (v == 0 || v == 1){//DH_UNKM
-        ierr = VecSetOption(*petsc_vecs[v], VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+      if (v == 0 || v == 1 || v == 5 || v == 7){//DH_UNKM
+        ierr = VecSetOption(*petsc_vecs[v],VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
       }
 
       std::vector<bool>   SV(N_Solids,false);  //solid visited history
@@ -2720,7 +2731,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
             for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
               array[dofs_1[j]] = temp.at(dofs_0[j]);
           }//end for k
-          if (v == 0 || v == 1){
+          if (v == 0 || v == 1 || v == 4 || v == 6){
             tagP = point->getTag();
             nod_id = is_in_id(tagP,flusoli_tags);
 
@@ -2728,9 +2739,9 @@ PetscErrorCode AppCtx::meshAdapt_s()
               if (!SV[nod_id-1]){
                 for (int l = 0; l < LZ; l++){
                   dofs_fs_0 = dof_handler_tmp[DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
-                              dof_handler_tmp[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id) - LZ + l;
+                              dof_handler_tmp[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id-1) + l;
                   dofs_fs_1 = dof_handler    [DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
-                              dof_handler    [DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id) - LZ + l;
+                              dof_handler    [DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id-1) + l;
                   array[dofs_fs_1] = temp.at(dofs_fs_0);
                 }
                 SV[nod_id-1] = true;
@@ -2740,6 +2751,10 @@ PetscErrorCode AppCtx::meshAdapt_s()
         }//end if !marked
       }//end for point
       // interpolate values at new points
+
+      if (v == 7 || v == 8 || v == 9 || v == 10)
+        continue;
+
       std::list<EdgeVtcs>::iterator it     = adde_vtcs.begin();
       std::list<EdgeVtcs>::iterator it_end = adde_vtcs.end();
       for (; it != it_end; ++it)
@@ -2766,13 +2781,13 @@ PetscErrorCode AppCtx::meshAdapt_s()
             for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
               array[dofs_1[c]] += weight*temp[dofs_0[c]];
           }
-          if ((v == 0 || v == 1) && (k == VAR_U)){
+          if ((v == 0 || v == 1 || v == 4 || v == 6) && (k == VAR_U)){
             tagP = point->getTag();
             nod_id = is_in_id(tagP,flusoli_tags);
             if (nod_id){
               for (int l = 0; l < LZ; l++){
                 dofs_fs_1 = dof_handler[DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
-                            dof_handler[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id) - LZ + l;
+                            dof_handler[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id-1) + l;
                 Zf(l) = array[dofs_fs_1];
               }
               point->getCoord(X.data(),dim);
@@ -2795,7 +2810,8 @@ PetscErrorCode AppCtx::meshAdapt_s()
       mesh->getNodePtr(pt_id)->setMarkedTo(false);
     }
 
-  } // end tranf
+
+  } // end transference
 
   //Vec Vec_res;
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);                     CHKERRQ(ierr);
@@ -2806,6 +2822,11 @@ PetscErrorCode AppCtx::meshAdapt_s()
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                  CHKERRQ(ierr);
   ierr = VecSetSizes(Vec_v_mid, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
   ierr = VecSetFromOptions(Vec_v_mid);                             CHKERRQ(ierr);
+
+  //Vec Vec_v_1
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_1);                  CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_v_1, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_v_1);                             CHKERRQ(ierr);
 
   //Vec Vec_normal;
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal);                  CHKERRQ(ierr);

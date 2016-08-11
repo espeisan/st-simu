@@ -1417,6 +1417,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   VectorXi  dofs_fs(LZ);
   Vector3d  Xg, XG_temp, Us;
   int       nod_id, nod_is, tag, nod_vs, nodsum;
+  int       PI = 10; //Picard Iterations
 
   VecZeroEntries(Vec_v_mid);  //this size(V) = size(X) = size(U)
   VecZeroEntries(Vec_v_1);
@@ -1511,7 +1512,7 @@ PetscErrorCode AppCtx::setInitialConditions()
       getNodeDofs(&*point,DH_UNKM,VAR_P,dofs.data());
       double p_in = p_initial(X, tag);
       VecSetValues(Vec_uzp_0,1,dofs.data(),&p_in,INSERT_VALUES);
-      VecSetValues(Vec_uzp_1,1,dofs.data(),&p_in,INSERT_VALUES);
+      //VecSetValues(Vec_uzp_1,1,dofs.data(),&p_in,INSERT_VALUES);
     }
 
     // vel
@@ -1523,7 +1524,7 @@ PetscErrorCode AppCtx::setInitialConditions()
     if (nodsum){
       Zf = z_initial(X, tag);
       Uf = SolidVel(X, XG_0[nodsum-1], Zf, dim);
-      VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
+      //VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
       if (nod_vs){
         getNodeDofs(&*point, DH_MESH, VAR_M, dofs_mesh.data());
         VecGetValues(Vec_normal, dim, dofs_mesh.data(), Nr.data());
@@ -1537,7 +1538,7 @@ PetscErrorCode AppCtx::setInitialConditions()
           dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum-1) + l;
         }
         VecSetValues(Vec_uzp_0, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);  //cout << dofs_fs.transpose() << endl;
-        VecSetValues(Vec_uzp_1, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);
+        //VecSetValues(Vec_uzp_1, LZ, dofs_fs.data(), Zf.data(), INSERT_VALUES);
         Xg = XG_0[nodsum-1];
         Xg(0) = Xg(0)+dt*Zf(0); Xg(1) = Xg(1)+dt*Zf(1); if (dim == 3){Xg(2) = Xg(2)+dt*Zf(2);}
         XG_1[nodsum-1] = Xg;
@@ -1548,7 +1549,7 @@ PetscErrorCode AppCtx::setInitialConditions()
     else{
       Uf = u_initial(X, tag);
       VecSetValues(Vec_uzp_0, dim, dofs.data(), Uf.data(), INSERT_VALUES);  //cout << dofs.transpose() << endl;
-      VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
+      //VecSetValues(Vec_uzp_1, dim, dofs.data(), Uf.data(), INSERT_VALUES);
     }
 
   } // end point loop
@@ -1556,7 +1557,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   //Assembly(Vec_uzp_0);  View(Vec_uzp_0,"matrizes/vuzp0.m","vuzp0m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
   //Assembly(Vec_uzp_1);  View(Vec_uzp_1,"matrizes/vuzp1.m","vuzp1m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
   //Assembly(Vec_slipv_0);  View(Vec_slipv_0,"matrizes/slip0.m","slipm");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
-//  VecCopy(Vec_uzp_0,Vec_uzp_1);  //PetscInt size1; //u_unk+z_unk+p_unk //VecGetSize(Vec_up_0,&size1);
+  VecCopy(Vec_uzp_0,Vec_uzp_1);  //PetscInt size1; //u_unk+z_unk+p_unk //VecGetSize(Vec_up_0,&size1);
   //VecCopy(Vec_slipv_0, Vec_slipv_1);
   //plotFiles();
   // remember: Vec_normals follows the Vec_x_1
@@ -1585,7 +1586,7 @@ PetscErrorCode AppCtx::setInitialConditions()
     {
       setUPInitialGuess();  //applies b.c. to Vec_uzp_1, applied once per time_step
 
-      for (int i = 0; i < 1; ++i)  // predictor-corrector to initialize
+      for (int i = 0; i < PI; ++i)  // predictor-corrector to initialize
       {
         printf("\tIterations %d\n", i);
         // * SOLVE THE SYSTEM *
@@ -1597,8 +1598,10 @@ PetscErrorCode AppCtx::setInitialConditions()
         // * SOLVE THE SYSTEM *
 
         // update
-        if (ale && m==0)
+        if (ale)
         {
+          if (m == 1  && i == PI-1) continue;
+          if (is_bdf2 && i == PI-1) continue;
           //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
           // move the mesh
@@ -1642,6 +1645,7 @@ PetscErrorCode AppCtx::setInitialConditions()
           //VecCopy(Vec_uzp_1,Vec_uzp_m1);
           ////-----
           VecCopy(Vec_uzp_0,Vec_uzp_m2);
+          if (is_slipv) VecCopy(Vec_slipv_0,Vec_slipv_m2);
           /*///-----
           VecCopy(Vec_uzp_1, Vec_duzp_0);
           VecAXPY(Vec_duzp_0,-1.0,Vec_uzp_0);
@@ -1660,6 +1664,7 @@ PetscErrorCode AppCtx::setInitialConditions()
         {
           ////-----
           VecCopy(Vec_uzp_0,Vec_uzp_m1);
+          if (is_slipv) VecCopy(Vec_slipv_0,Vec_slipv_m1);
           /*///-----
           VecCopy(Vec_uzp_1, Vec_duzp);
           VecAXPY(Vec_duzp,-1.0,Vec_uzp_0);
@@ -1700,7 +1705,11 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecAXPY(Vec_x_1,-9./11.,Vec_x_0);
           copyMesh2Vec(Vec_x_0);
           VecAXPY(Vec_x_1,18./11.,Vec_x_0);
-          if (N_Solids){moveCenterMass(0.0);}// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
+          if (N_Solids){
+            moveCenterMass(0.0);
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+            updateSolidMesh();
+          }// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
           VecCopy(Vec_uzp_1, Vec_uzp_0);
           VecCopy(Vec_v_1,Vec_v_mid);
         }
@@ -1708,7 +1717,7 @@ PetscErrorCode AppCtx::setInitialConditions()
     }//end for bdf3 for m
   }// end if(ale)
   // normals
-  getVecNormals(&Vec_x_1, Vec_normal);
+  //getVecNormals(&Vec_x_1, Vec_normal);
 
   PetscFunctionReturn(0);
 }
@@ -1858,7 +1867,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecAXPY(Vec_x_1,-1./3.,Vec_x_0);
       copyMesh2Vec(Vec_x_0);
       VecAXPY(Vec_x_1,4./3.,Vec_x_0);
-      if (N_Solids){moveCenterMass(2.0);}
+      if (N_Solids){
+        moveCenterMass(2.0);
+        if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+        updateSolidMesh();
+      }
       VecCopy(Vec_v_1,Vec_v_mid);
     }
     else if (is_bdf2_ab)
@@ -1871,7 +1884,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
       copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
       calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
       VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
-      if (N_Solids){moveCenterMass(1.5);}
+      if (N_Solids){
+        moveCenterMass(1.5);
+        if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+        updateSolidMesh();
+      }
       // velocity at integer step
       //VecScale(Vec_v_1, 1.5);
       //VecAXPY(Vec_v_1,-.5,Vec_v_mid);
@@ -1900,6 +1917,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
       updateSolidMesh();
     }
   }
+
+  getVecNormals(&Vec_x_1, Vec_normal);
 
   //print solid's center information
   ofstream filg, filv;
@@ -1993,6 +2012,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecCopy(Vec_uzp_0,Vec_uzp_m1);
       if (is_bdf2_ab)
         VecCopy(Vec_v_1,Vec_v_mid);
+
+      if (is_slipv) VecCopy(Vec_slipv_0,Vec_slipv_m1);
     }
     else if (is_bdf3)
     {
@@ -2001,6 +2022,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
       ////-----
       VecCopy(Vec_uzp_m1,Vec_uzp_m2);
       VecCopy(Vec_uzp_0,Vec_uzp_m1);
+      if (is_slipv){
+        VecCopy(Vec_slipv_m1,Vec_slipv_m2);
+        VecCopy(Vec_slipv_0,Vec_slipv_m1);
+      }
       /*///-----
       VecCopy(Vec_duzp, Vec_duzp_0);
       VecCopy(Vec_uzp_1, Vec_duzp);
@@ -2109,7 +2134,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
           VecAXPY(Vec_x_1,-1./3.,Vec_x_0);
           copyMesh2Vec(Vec_x_0);
           VecAXPY(Vec_x_1,4./3.,Vec_x_0);
-          if (N_Solids){moveCenterMass(2.0);}
+          if (N_Solids){
+            moveCenterMass(2.0);
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+            updateSolidMesh();
+          }
           VecCopy(Vec_v_1,Vec_v_mid);
         }
         else if (is_bdf2_ab)
@@ -2122,7 +2151,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
           copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
           VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
-          if (N_Solids){moveCenterMass(1.5);}
+          if (N_Solids){
+            moveCenterMass(1.5);
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+            updateSolidMesh();
+          }
           // velocity at integer step
           //VecScale(Vec_v_1, 1.5);
           //VecAXPY(Vec_v_1,-.5,Vec_v_mid);
@@ -2160,7 +2193,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
         VecAXPY(Vec_x_1,-9./11.,Vec_x_0);
         copyMesh2Vec(Vec_x_0);
         VecAXPY(Vec_x_1,18./11.,Vec_x_0);
-        if (N_Solids){moveCenterMass(0.0);}// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
+        if (N_Solids){
+          moveCenterMass(0.0);
+          if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+          updateSolidMesh();
+        }// update center of mass D_{3}XG^{n+1} = dt*V^{n+1}
         // VecCopy(Vec_uzp_1, Vec_uzp_0) is done after the end if ale
         VecCopy(Vec_v_1,Vec_v_mid);
       }
@@ -2172,8 +2209,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
         //VecScale(Vec_x_1, 1.5);
         //VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
-        velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);
-        velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
+        //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);
+        //velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
         if (N_Solids){
@@ -2959,7 +2996,7 @@ PetscErrorCode AppCtx::updateSolidVel()
     nodsum = nod_id+nod_is+nod_vs;
     if (nodsum){
       for (int l = 0; l < LZ; l++){
-        dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum) - LZ + l;
+        dofs_fs(l) = n_unknowns_u + n_unknowns_p + LZ*(nodsum-1) + l;
       }
       dof_handler[DH_UNKM].getVariable(VAR_U).getVertexDofs(mapM_r.data(),&*point);
       //VecGetValues(Vec_x_0, mapM_r.size(), mapM_r.data(), X.data());
@@ -2999,7 +3036,7 @@ PetscErrorCode AppCtx::moveCenterMass(double vtheta)
   for (int s = 0; s < N_Solids; s++){
 
     for (int l = 0; l < dim; l++){
-      dofs(l) = n_unknowns_u + n_unknowns_p + LZ*(s+1) - LZ + l;
+      dofs(l) = n_unknowns_u + n_unknowns_p + LZ*s + l;
     }
     VecGetValues(Vec_uzp_0, dim, dofs.data(), U0.data());
     VecGetValues(Vec_uzp_1, dim, dofs.data(), U1.data());
@@ -3075,7 +3112,6 @@ PetscErrorCode AppCtx::updateSolidMesh()
       VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X0.data());
       X0 = RotM(theta_1[nodsum-1]-theta_0[nodsum-1],dim)*(X0 - XG_0[nodsum-1]) + XG_1[nodsum-1];// - XG_0[nodsum-1];
       VecSetValues(Vec_x_1, dofs.size(), dofs.data(), X0.data(), INSERT_VALUES);
-      nod_vs = is_in_id(tag,slipvel_tags);
       if (nod_vs){
         VecGetValues(Vec_slipv_0, dim, dofs.data(), Vs.data());
         Vs = RotM(theta_1[nod_vs-1]-theta_0[nod_vs-1],dim)*Vs;// + XG_1[nod_id+nod_is-1]; // - XG_0[nod_id+nod_is-1];
