@@ -1410,12 +1410,12 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
         else
         {
           if (nodsum){
-            Vm = vectorSolidMesh(nodsum,&*point);
+            Vm = vectorSolidMesh(nodsum,&*point,nod_vs);
             tmp(0) = Vm(0); tmp(1) = Vm(1); if (dim == 3) tmp(2) = Vm(2);
           }
           else{
-            VecGetValues(Vec_up_0,  dim, node_dofs_fluid_fs.data(), U0.data());
-            VecGetValues(Vec_up_1,  dim, node_dofs_fluid_fs.data(), U1.data());
+            VecGetValues(Vec_up_0, dim, node_dofs_fluid_fs.data(), U0.data());
+            VecGetValues(Vec_up_1, dim, node_dofs_fluid_fs.data(), U1.data());
             tmp = vtheta*U1 + (1.-vtheta)*U0;  //VecNorm(difff,NORM_2,&nrm);  cout << "\n" << nrm << endl;
           }
           VecSetValues(Vec_v_mid, dim, node_dofs_mesh.data(), tmp.data(), INSERT_VALUES);
@@ -2824,14 +2824,14 @@ PetscErrorCode AppCtx::meshAdapt_s()
   } // end transference
 
   //Vec Vec_res;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);                     CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_res_fs, PETSC_DECIDE, n_unknowns_fs);         CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_res_fs);                                CHKERRQ(ierr);
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);               CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_res_fs, PETSC_DECIDE, n_unknowns_fs);   CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_res_fs);                          CHKERRQ(ierr);
 
   //Vec Vec_v_mid
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                  CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_v_mid, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_v_mid);                             CHKERRQ(ierr);
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_v_mid, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_v_mid);                           CHKERRQ(ierr);
 
   //Vec Vec_v_1
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_1);                  CHKERRQ(ierr);
@@ -2839,14 +2839,22 @@ PetscErrorCode AppCtx::meshAdapt_s()
   ierr = VecSetFromOptions(Vec_v_1);                             CHKERRQ(ierr);
 
   //Vec Vec_normal;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal);                  CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_normal, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_normal);                             CHKERRQ(ierr);
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal);               CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_normal, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_normal);                          CHKERRQ(ierr);
 
   //Vec Vec_res_m;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_m);                     CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);         CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_res_m);
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_m);                CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_res_m);                           CHKERRQ(ierr);
+
+  if (is_bdf2 || is_bdf3)
+  {
+    //Vec Vec_x_cur; current
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_x_cur);              CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_x_cur, PETSC_DECIDE, n_dofs_v_mesh);  CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_x_cur);                         CHKERRQ(ierr);
+  }
 
   std::vector<int> nnz;
 

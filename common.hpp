@@ -449,7 +449,7 @@ public:
   PetscErrorCode updateSolidMesh();
   PetscErrorCode velNoSlip(Vec const& Vec_uzp, Vec const& Vec_sv, Vec &Vec_uzp_ns);
   PetscErrorCode plotFiles();
-  Vector vectorSolidMesh(double const K, Point const* point);
+  Vector vectorSolidMesh(int const K, Point const* point, int const vs);
   //void printContactAngle(bool _print);
 
   void computeError(Vec const& Vec_x, Vec &Vec_up_1, double tt);

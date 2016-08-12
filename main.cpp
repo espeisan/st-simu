@@ -1425,7 +1425,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   VectorXi  dofs_fs(LZ);
   Vector3d  Xg, XG_temp, Us;
   int       nod_id, nod_is, tag, nod_vs, nodsum;
-  int       PI = 10; //Picard Iterations
+  int       PI = 1; //Picard Iterations
 
   VecZeroEntries(Vec_v_mid);  //this size(V) = size(X) = size(U)
   VecZeroEntries(Vec_v_1);
@@ -1449,9 +1449,11 @@ PetscErrorCode AppCtx::setInitialConditions()
     if (is_bdf3){
       VecZeroEntries(Vec_slipv_m2);
     }
-    VecZeroEntries(Vec_uzp_0_ns);
-    VecZeroEntries(Vec_uzp_1_ns);
+    VecZeroEntries(Vec_uzp_0_ns); //borrar
+    VecZeroEntries(Vec_uzp_1_ns); //borrar
   }
+  if (N_Solids && (is_bdf2 || is_bdf3))
+    VecZeroEntries(Vec_x_cur);
 
   copyMesh2Vec(Vec_x_0);  //copy initial mesh coordinates to Vec_x_0 = (a1,a2,a3,b1,b2,b3,c1,c2,c3,...)
   copyMesh2Vec(Vec_x_1);  //copy initial mesh coordinates to Vec_x_1
@@ -1572,15 +1574,9 @@ PetscErrorCode AppCtx::setInitialConditions()
   calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, 0.0); //Vec_up_0 = Vec_up_1, vtheta = 1.0, mean b.c. = Vec_up_1 = Vec_v_mid init. guess SNESSolve
   // move the mesh
   VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = dt*Vec_v_mid + Vec_x_0 // for zero Dir. cond. solution lin. elast. is Vec_v_mid = 0
-  if (N_Solids) updateSolidMesh();
+  //if (N_Solids) updateSolidMesh();
   //VecView(Vec_v_mid,PETSC_VIEWER_STDOUT_WORLD); //VecView(Vec_x_0,PETSC_VIEWER_STDOUT_WORLD); VecView(Vec_x_1,PETSC_VIEWER_STDOUT_WORLD);
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
-
-  if (false && is_mr_ab){
-    //copyVec2Mesh(Vec_x_1);
-    //plotFiles();
-    PetscFunctionReturn(0);
-  }
 
   if (is_basic){
     if (N_Solids){moveCenterMass(0.0);}
@@ -1610,11 +1606,13 @@ PetscErrorCode AppCtx::setInitialConditions()
         {
           if (m == 1  && i == PI-1) continue;
           if (is_bdf2 && i == PI-1) continue;
+
+          if (N_Solids) moveCenterMass(0.5);
           //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
           // move the mesh
           VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
-          if (N_Solids){
+          if (N_Solids && false){
             moveCenterMass(0.5);
             updateSolidMesh();
           }
@@ -1965,8 +1963,6 @@ PetscErrorCode AppCtx::solveTimeProblem()
     if (solve_the_sys)
     {
 
-      setUPInitialGuess();  //setup Vec_uzp_1 for SNESSolve
-
       if (fprint_hgv){
         if ((time_step%print_step)==0 || time_step == (maxts-1)){
           getSolidVolume();
@@ -2001,6 +1997,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
       //View(Vec_uzp_0, buf1, buf2);
       //sprintf(buf1,"matrizes/mal%d.m",time_step); sprintf(buf2,"malm%d",time_step);
       //View(Vec_x_0, buf1, buf2);  //TT++;
+
+      setUPInitialGuess();  //setup Vec_uzp_1 for SNESSolve
 
       for (int kk = 0 ; kk < 1+3*full_implicit; kk++)
       {
@@ -3105,10 +3103,10 @@ PetscErrorCode AppCtx::moveCenterMass(double const vtheta)
   PetscFunctionReturn(0);
 }
 
-Vector AppCtx::vectorSolidMesh(double const K, Point const* point)
+Vector AppCtx::vectorSolidMesh(int const K, Point const* point, int const vs)
 {
   VectorXi  dofs(dim);
-  Vector    Vm(Vector::Zero(3)), X_1(3), X_0(3), X_m1(3), X_m2(3);
+  Vector    Vm(Vector::Zero(3)), X_1(3), X_0(3), X_m1(3), X_m2(3), Vs(Vector::Zero(3));;
 
   getNodeDofs(&*point, DH_MESH, VAR_M, dofs.data());
 
@@ -3136,6 +3134,12 @@ Vector AppCtx::vectorSolidMesh(double const K, Point const* point)
     VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X_0.data());
     X_1 = RotM(theta_1[K-1]-theta_0[K-1],dim)*(X_0 - XG_0[K-1]) + XG_1[K-1];
     Vm  = (X_1 - X_0)/dt;
+  }
+
+  if (vs){
+    VecGetValues(Vec_slipv_0, dim, dofs.data(), Vs.data());
+    Vs = RotM(theta_1[vs-1]-theta_0[vs-1],dim)*Vs;// + XG_1[nod_id+nod_is-1]; // - XG_0[nod_id+nod_is-1];
+    VecSetValues(Vec_slipv_1, dim, dofs.data(), Vs.data(), INSERT_VALUES);
   }
 
   return Vm;
