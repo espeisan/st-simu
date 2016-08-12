@@ -672,8 +672,8 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     Vector              Ubqp(dim); // bble
     Vector              Uqp_old(dim), Zqp_old(dim); // n
     Vector              Uqp_new(dim), Zqp_new(dim); // n+1
-    Vector              dUqp_old(dim), Uqp_m1(dim);  // n
-    Vector              dUqp_vold(dim), Uqp_m2(dim);  // n
+    Vector              dUqp_old(dim), Uqp_m1(dim), Vsqp_m1(dim);  // n
+    Vector              dUqp_vold(dim), Uqp_m2(dim), Vsqp_m2(dim);  // n
     Vector              Vqp(dim);
     Vector              Uconv_qp(dim);
     Vector              dUdt(dim);
@@ -1062,6 +1062,8 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         if (SFI){
           if (is_bdf2 && time_step > 0){
             Uqp_m1 = u_coefs_c_om1c_trans * phi_c[qp];
+            if (VSF)
+              Uqp_m1 += vs_coefs_c_om1.transpose() * phi_c[qp];
           }
           else if (is_bdf3 && time_step > 1){
             //u_coefs_c_om1 = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
@@ -1072,6 +1074,10 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
             //VecGetValues(Vec_uzp_m2,  mapU_t.size(), mapU_t.data(), u_coefs_c_om2.data());
             //u_coefs_c_om2_trans = u_coefs_c_om2.transpose();
             Uqp_m2 = u_coefs_c_om2c_trans * phi_c[qp];
+            if (VSF){
+              Uqp_m1 += vs_coefs_c_om1.transpose() * phi_c[qp];
+              Uqp_m2 += vs_coefs_c_om2.transpose() * phi_c[qp];
+            }
           }
           for (int J = 0; J < nodes_per_cell; J++){
             if (SV_c[J]){

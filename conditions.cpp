@@ -1000,26 +1000,28 @@ Tensor RotM(double theta, int dim)
   return M;
 }
 
-Vector SlipVel(Vector const& X, Vector const& XG, int dim, int tag)
+Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag)
 {
   Vector V(Vector::Zero(dim));
   Vector X3(Vector::Zero(3));
   Vector Xp(Vector::Zero(dim));
-  double alp = 0.1;
-  double bet = 0.1;
+
+  double alp = 1;
+  double bet = 1;
+
+  Tensor I(dim,dim);
+  I.setIdentity();
+  Tensor Pr = I - normal*normal.transpose();
 
   if (dim == 2)
   {
-    X3(0) = X(0); X3(1) = X(1);
-    X3 = X3 - XG;
-    X3.normalize();
-    Xp(0) = X3(1); Xp(1) = -X3(0);
-    if (tag == 104){
-      V = alp*Xp;
+    if (false && tag == 100){
+      V(0) = -0.01; V(1) = -0.01;
     }
-    else if (tag == 105){
-      V = -bet*Xp;
+    else if (tag == 103){
+      V(0) = -0.5; V(1) = 0.5;
     }
+    V = Pr*V;
   }
 
   return V;

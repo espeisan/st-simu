@@ -1331,7 +1331,7 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
 
     Vector      Xp(dim), Xg(dim), Vels(dim);
     Vector3d    Xgt;
-    int         tag;
+    int         tag, nod_id, nod_is, nod_vs, nodsum;
 
     Vector      U0(dim), U0_fs(LZ);
     Vector      X0(dim), Y0(dim);
@@ -1346,6 +1346,9 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
     for (; point != point_end; ++point)  //to calculate Vec_v_mid at each point (initial guess)
     {
       tag = point->getTag();
+      nod_id = is_in_id(tag,solidonly_tag);
+      nod_is = is_in_id(tag,slipvel_tag);
+      nod_vs = is_in_id(tag,flusoli_tag);
 
       getNodeDofs(&*point, DH_MESH, VAR_M, node_dofs_mesh.data());
       getNodeDofs(&*point, DH_UNKM, VAR_U, node_dofs_fluid_fs.data());
@@ -1408,6 +1411,13 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
           VecGetValues(Vec_up_0,  dim, node_dofs_fluid_fs.data(), U0.data());
           VecGetValues(Vec_up_1,  dim, node_dofs_fluid_fs.data(), U1.data());
           tmp = vtheta*U1 + (1.-vtheta)*U0;  //VecNorm(difff,NORM_2,&nrm);  cout << "\n" << nrm << endl;
+
+          nodsum = nod_is+nod_id+nod_vs;
+          if (nodsum)
+          {
+            cout << "new";
+          }
+
           VecSetValues(Vec_v_mid, dim, node_dofs_mesh.data(), tmp.data(), INSERT_VALUES);
         }
       } // end else if force_mesh_velocity
@@ -2671,14 +2681,14 @@ PetscErrorCode AppCtx::meshAdapt_s()
     dofsUpdate();  //updates DH_ information: # variables u, z, p, mesh can change
     cout << "#z=" << n_nodes_fsi << " #u=" << n_unknowns_u << " #p=" << n_unknowns_p << " #v=" << n_dofs_v_mesh  << endl;
 
-    Vec *petsc_vecs[] = {&Vec_uzp_0,    &Vec_uzp_1,    &Vec_x_0,      &Vec_x_1,      &Vec_uzp_m1,   &Vec_x_aux,    &Vec_uzp_m2,   &Vec_slipv_0,  &Vec_slipv_1,  &Vec_slipv_m1, &Vec_slipv_m2};
-    int DH_t[]        = {DH_UNKM,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_MESH,       DH_MESH      };
-    int n_unks_t[]    = {n_unknowns_fs, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh};
+    Vec *petsc_vecs[] = {&Vec_uzp_0,    &Vec_uzp_1,    &Vec_x_0,      &Vec_x_1,      &Vec_uzp_m1,   &Vec_v_mid,    &Vec_x_aux,    &Vec_uzp_m2,   &Vec_slipv_0,  &Vec_slipv_1,  &Vec_slipv_m1, &Vec_slipv_m2};
+    int DH_t[]        = {DH_UNKM,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_MESH,       DH_MESH      };
+    int n_unks_t[]    = {n_unknowns_fs, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh};
     int L = 4;
     if (is_slipv){L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
     else{
-      if(is_bdf2){L = 5;}
-      else if (is_bdf3){L = 7;}//{L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
+      if(is_bdf2){L = 6;}
+      else if (is_bdf3){L = 8;}//{L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
     }
     std::vector<Real> temp;
 
@@ -2686,9 +2696,9 @@ PetscErrorCode AppCtx::meshAdapt_s()
     for (int v = 0; v < L; ++v)
     {
       if (is_slipv){
-        if ((is_mr_ab || is_basic) && (v == 4 || v == 5 || v == 6 || v == 9 || v == 10))
+        if ((is_mr_ab || is_basic) && (v == 4 || v == 5 || v == 6 || v == 7 || v == 10 || v == 11))
           continue;
-        else if (is_bdf2 && (v == 5 || v == 6 || v == 10))
+        else if (is_bdf2 && (v == 6 || v == 7 || v == 11))
           continue;
       }
 
@@ -2706,7 +2716,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
       ierr = VecCreate(PETSC_COMM_WORLD, petsc_vecs[v]);                              CHKERRQ(ierr);
       ierr = VecSetSizes(*petsc_vecs[v], PETSC_DECIDE, n_unks_t[v]);                  CHKERRQ(ierr);  //dof_handler[DH_t[v]].numDofs()
       ierr = VecSetFromOptions(*petsc_vecs[v]);                                       CHKERRQ(ierr);
-      if (v == 0 || v == 1 || v == 5 || v == 7){//DH_UNKM
+      if (v == 0 || v == 1 || v == 4 || v == 7){//DH_UNKM
         ierr = VecSetOption(*petsc_vecs[v],VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
       }
 
@@ -2731,7 +2741,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
             for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
               array[dofs_1[j]] = temp.at(dofs_0[j]);
           }//end for k
-          if (v == 0 || v == 1 || v == 4 || v == 6){
+          if (v == 0 || v == 1 || v == 4 || v == 7){
             tagP = point->getTag();
             nod_id = is_in_id(tagP,flusoli_tags);
 
@@ -2752,7 +2762,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
       }//end for point
       // interpolate values at new points
 
-      if (v == 7 || v == 8 || v == 9 || v == 10)
+      if (v == 8 || v == 9 || v == 10 || v == 11)
         continue;
 
       std::list<EdgeVtcs>::iterator it     = adde_vtcs.begin();
@@ -2781,7 +2791,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
             for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
               array[dofs_1[c]] += weight*temp[dofs_0[c]];
           }
-          if ((v == 0 || v == 1 || v == 4 || v == 6) && (k == VAR_U)){
+          if ((v == 0 || v == 1 || v == 4 || v == 7) && (k == VAR_U)){
             tagP = point->getTag();
             nod_id = is_in_id(tagP,flusoli_tags);
             if (nod_id){
@@ -2817,11 +2827,6 @@ PetscErrorCode AppCtx::meshAdapt_s()
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);                     CHKERRQ(ierr);
   ierr = VecSetSizes(Vec_res_fs, PETSC_DECIDE, n_unknowns_fs);         CHKERRQ(ierr);
   ierr = VecSetFromOptions(Vec_res_fs);                                CHKERRQ(ierr);
-
-  //Vec Vec_v_mid
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                  CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_v_mid, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_v_mid);                             CHKERRQ(ierr);
 
   //Vec Vec_v_1
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_1);                  CHKERRQ(ierr);

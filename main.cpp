@@ -1602,8 +1602,9 @@ PetscErrorCode AppCtx::setInitialConditions()
         {
           if (m == 1  && i == PI-1) continue;
           if (is_bdf2 && i == PI-1) continue;
+          //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns); velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
           //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
-          calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
+          calcMeshVelocity(Vec_x_0, Vec_uzp_0_ns, Vec_uzp_1_ns, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
           // move the mesh
           VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
           if (N_Solids){
@@ -2010,9 +2011,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
         computeError(Vec_x_0, Vec_uzp_0,current_time);
 
       VecCopy(Vec_uzp_0,Vec_uzp_m1);
-      if (is_bdf2_ab)
-        VecCopy(Vec_v_1,Vec_v_mid);
-
+      if (is_bdf2_ab) VecCopy(Vec_v_1,Vec_v_mid);
       if (is_slipv) VecCopy(Vec_slipv_0,Vec_slipv_m1);
     }
     else if (is_bdf3)
@@ -2209,8 +2208,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
         //VecScale(Vec_x_1, 1.5);
         //VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
-        //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);
-        //velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
+        //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns); velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
         if (N_Solids){
