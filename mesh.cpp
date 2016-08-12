@@ -1329,9 +1329,9 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
     VectorXi    node_dofs_fluid_fs(dim);
     VectorXi    node_dofs_solid_fs(LZ);
 
-    Vector      Xp(dim), Xg(dim), Vels(dim);
+    Vector      Xp(dim), Xg(dim), Vels(dim), Vm(3);
     Vector3d    Xgt;
-    int         tag;
+    int         tag, nod_id, nod_is, nod_vs, nodsum;
 
     Vector      U0(dim), U0_fs(LZ);
     Vector      X0(dim), Y0(dim);
@@ -1346,6 +1346,10 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
     for (; point != point_end; ++point)  //to calculate Vec_v_mid at each point (initial guess)
     {
       tag = point->getTag();
+      nod_id = is_in_id(tag,flusoli_tags);
+      nod_is = is_in_id(tag,solidonly_tags);
+      nod_vs = is_in_id(tag,slipvel_tags);
+      nodsum = nod_id+nod_is+nod_vs;
 
       getNodeDofs(&*point, DH_MESH, VAR_M, node_dofs_mesh.data());
       getNodeDofs(&*point, DH_UNKM, VAR_U, node_dofs_fluid_fs.data());
@@ -1405,9 +1409,15 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
         }
         else
         {
-          VecGetValues(Vec_up_0,  dim, node_dofs_fluid_fs.data(), U0.data());
-          VecGetValues(Vec_up_1,  dim, node_dofs_fluid_fs.data(), U1.data());
-          tmp = vtheta*U1 + (1.-vtheta)*U0;  //VecNorm(difff,NORM_2,&nrm);  cout << "\n" << nrm << endl;
+          if (nodsum){
+            Vm = vectorSolidMesh(nodsum,&*point);
+            tmp(0) = Vm(0); tmp(1) = Vm(1); if (dim == 3) tmp(2) = Vm(2);
+          }
+          else{
+            VecGetValues(Vec_up_0,  dim, node_dofs_fluid_fs.data(), U0.data());
+            VecGetValues(Vec_up_1,  dim, node_dofs_fluid_fs.data(), U1.data());
+            tmp = vtheta*U1 + (1.-vtheta)*U0;  //VecNorm(difff,NORM_2,&nrm);  cout << "\n" << nrm << endl;
+          }
           VecSetValues(Vec_v_mid, dim, node_dofs_mesh.data(), tmp.data(), INSERT_VALUES);
         }
       } // end else if force_mesh_velocity
