@@ -266,7 +266,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
-  is_mr_ab           = PETSC_TRUE;
+  is_mr_ab           = PETSC_FALSE;
   is_bdf3            = PETSC_FALSE;
   is_bdf2            = PETSC_FALSE;
   is_bdf2_bdfe       = PETSC_FALSE;
@@ -274,7 +274,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   is_bdf_cte_vel     = PETSC_FALSE;
   is_bdf_euler_start = PETSC_FALSE;
   is_bdf_extrap_cte  = PETSC_FALSE;
-  is_basic           = PETSC_FALSE;
+  is_basic           = PETSC_TRUE;
 
   if ((is_bdf2 && utheta!=1) || (is_bdf3 && utheta!=1))
   {
@@ -1425,7 +1425,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   VectorXi  dofs_fs(LZ);
   Vector3d  Xg, XG_temp, Us;
   int       nod_id, nod_is, tag, nod_vs, nodsum;
-  int       PI = 1; //Picard Iterations
+  int       PI = 10; //Picard Iterations
 
   VecZeroEntries(Vec_v_mid);  //this size(V) = size(X) = size(U)
   VecZeroEntries(Vec_v_1);
@@ -1579,7 +1579,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
 
   if (is_basic){
-    if (N_Solids){moveCenterMass(0.0);}
+    //if (N_Solids){moveCenterMass(0.0);}
     PetscFunctionReturn(0);
   }
 
@@ -1604,8 +1604,25 @@ PetscErrorCode AppCtx::setInitialConditions()
         // update
         if (ale)
         {
-          if (m == 1  && i == PI-1) continue;
-          if (is_bdf2 && i == PI-1) continue;
+          if ((is_mr_ab || is_bdf2) && i == PI-1){
+            //XG_0 = XG_1;
+            //theta_0 = theta_1;
+            if (is_mr_ab && time_step == 0)
+             {
+               pressureTimeCorrection(Vec_uzp_0, Vec_uzp_1, 0., 1); // press(n) = press(n+1/2) - press(n-1/2)
+               if (plot_exact_sol && maxts <= 1)
+                 computeError(Vec_x_0, Vec_uzp_0,current_time);
+             }
+            plotFiles();
+            continue;
+          }
+          if (m == 0 && i == PI-1){
+            plotFiles();
+          }
+          if (m == 1 && i == PI-1){
+            plotFiles();
+            continue;
+          }
 
           if (N_Solids) moveCenterMass(0.5);
           //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
@@ -1686,6 +1703,7 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecScale(Vec_x_1, 3.0);
           VecAXPY(Vec_x_1,-3.0,Vec_x_0);
           VecAXPY(Vec_x_1, 1.0,Vec_x_aux);
+          copyMesh2Vec(Vec_x_cur);
           // copyMesh2Vec(Vec_x_0); // we need Vec_x_0 later, don't touch it
           // estraga Vec_uzp_0, usado porque não se precisa mais
           ////-----
@@ -1703,6 +1721,7 @@ PetscErrorCode AppCtx::setInitialConditions()
           /*///-----
 
           // calc V^{n+1} and update with D_{3}X^{n+1} = dt*V^{n+1}
+          if (N_Solids) moveCenterMass(0.0);
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.0, Vec_v_1, current_time);  //vtheta = 0 porque Vec_uzp_0 JÁ É o extrapolado
           VecCopy(Vec_v_1, Vec_x_1);
           VecScale(Vec_x_1, 6./11.*dt);
@@ -1711,7 +1730,7 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecAXPY(Vec_x_1,-9./11.,Vec_x_0);
           copyMesh2Vec(Vec_x_0);
           VecAXPY(Vec_x_1,18./11.,Vec_x_0);
-          if (N_Solids){
+          if (N_Solids && false){
             moveCenterMass(0.0);
             if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
             updateSolidMesh();
@@ -1866,14 +1885,16 @@ PetscErrorCode AppCtx::solveTimeProblem()
       // extrapolation \tilde{X}^{n+1}=2X^{n}-X^{n-1}
       VecScale(Vec_x_1, 2.0);
       VecAXPY(Vec_x_1,-1.0,Vec_x_0);
+      copyMesh2Vec(Vec_x_cur);
       // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
+      if (N_Solids) moveCenterMass(2.0);
       calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
       VecCopy(Vec_v_1, Vec_x_1);
       VecScale(Vec_x_1, 2./3.*dt);
       VecAXPY(Vec_x_1,-1./3.,Vec_x_0);
       copyMesh2Vec(Vec_x_0);
       VecAXPY(Vec_x_1,4./3.,Vec_x_0);
-      if (N_Solids){
+      if (N_Solids && false){
         moveCenterMass(2.0);
         if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
         updateSolidMesh();
@@ -1888,9 +1909,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecScale(Vec_x_1, 1.5);
       VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
       copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+      if (N_Solids) moveCenterMass(1.5);
       calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
       VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
-      if (N_Solids){
+      if (N_Solids && false){
         moveCenterMass(1.5);
         if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
         updateSolidMesh();
@@ -1905,7 +1927,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
     VecCopy(Vec_uzp_1, Vec_uzp_0);
   }
 
-  if (is_mr_ab && false){
+  if (is_mr_ab){
     current_time += dt;
     time_step += 1;
 
@@ -1915,13 +1937,12 @@ PetscErrorCode AppCtx::solveTimeProblem()
     //VecScale(Vec_x_1, 1.5);
     //VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
     copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+    //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
+    // extrapolate center of mass
+    if (N_Solids) moveCenterMass(1.5);
     calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
     VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
-    if (N_Solids){
-      moveCenterMass(1.5);
-      VecCopy(Vec_slipv_1,Vec_slipv_0);
-      updateSolidMesh();
-    }
+    VecCopy(Vec_uzp_1, Vec_uzp_0);
   }
 
   getVecNormals(&Vec_x_1, Vec_normal);
@@ -3043,7 +3064,7 @@ PetscErrorCode AppCtx::moveCenterMass(double const vtheta)
 {
   VectorXi    dofs(dim), dof(1);
   Vector      U0(Vector::Zero(3)), U1(Vector::Zero(3)), XG_temp(Vector::Zero(3)), omega0(1), omega1(1);
-  double      omega_temp;
+  double      theta_temp;
 
   for (int s = 0; s < N_Solids; s++){
 
@@ -3061,44 +3082,44 @@ PetscErrorCode AppCtx::moveCenterMass(double const vtheta)
       XG_1[s]   = (18./11.)*XG_1[s] - (9./11.)*XG_0[s] + (2./11.)*XG_aux[s] + (6./11.)*dt*U0;
       XG_aux[s] = XG_0[s];
       XG_0[s]   = XG_temp;
-      omega_temp   = theta_1[s];
+      theta_temp   = theta_1[s];
       theta_1[s]   = (18./11.)*theta_1[s] - (9./11.)*theta_0[s] + (2./11.)*theta_aux[s] + (6./11.)*dt*omega0(0);
       theta_aux[s] = theta_0[s];
-      theta_0[s]   = omega_temp;
+      theta_0[s]   = theta_temp;
     }
     else if (is_bdf2 && time_step > 0){
       if (is_bdf2_bdfe){
         XG_temp = XG_1[s];
         XG_1[s] = (4./3.)*XG_1[s] - (1./3.)*XG_0[s] + (2./3.)*dt*(vtheta*U1 + (1.-vtheta)*U0);
         XG_0[s] = XG_temp;
-        omega_temp = theta_1[s];
+        theta_temp = theta_1[s];
         theta_1[s] = (4./3.)*theta_1[s] - (1./3.)*theta_0[s] + (2./3.)*dt*(vtheta*omega1(0) + (1.-vtheta)*omega0(0));
-        theta_0[s] = omega_temp;
+        theta_0[s] = theta_temp;
       }
       else if (is_bdf2_ab){
-        XG_temp = XG_1[s];
+        XG_0[s] = XG_1[s];
         XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
-        XG_0[s] = XG_temp;
-        omega_temp = theta_1[s];
+        //XG_0[s] = XG_temp;
+        theta_0[s] = theta_1[s];
         theta_1[s] = dt*(vtheta*omega1(0) + (1.-vtheta)*omega0(0)) + theta_0[s];
-        theta_0[s] = omega_temp;
+        //theta_0[s] = theta_temp;
       }
     }
     else{  //for MR-AB and basic, and for all at time = t0
-      if (time_step == 0){
+      if (time_step == 0 || (is_bdf3 && time_step == 1)){
         XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
         theta_1[s] = dt*(vtheta*omega1(0) + (1.-vtheta)*omega0(0)) + theta_0[s];
       }
       else{
-        XG_temp = XG_1[s];
+        XG_0[s] = XG_1[s];
         XG_1[s] = dt*(vtheta*U1 + (1.-vtheta)*U0) + XG_0[s];
-        XG_0[s] = XG_temp;
-        omega_temp = theta_1[s];
+        //XG_0[s] = XG_temp;
+        theta_0[s] = theta_1[s];
         theta_1[s] = dt*(vtheta*omega1(0) + (1.-vtheta)*omega0(0)) + theta_0[s];
-        theta_0[s] = omega_temp;
+        //theta_0[s] = theta_temp;
       }
     }
-
+    cout << theta_0[s] << "   " << theta_1[s] << "     " << omega0(0) << "   " << omega1(0) << endl;
   }
   PetscFunctionReturn(0);
 }
