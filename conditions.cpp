@@ -1034,7 +1034,7 @@ double pho(Vector const& X, int tag)
 {
 //  if (tag == 15)
 //  {
-    return 1.0;//e3;///1e4;
+    return 0.0;//e3;///1e4;
 //  }
 //  else
 //  {
@@ -1066,7 +1066,7 @@ double muu(int tag)
 {
 //  if (tag == 15)
 //  {
-    return 0.00001;//1.0*0.1;
+    return 0.1;//1.0*0.1;
 //  }
 //  else
 //  {
@@ -1125,7 +1125,7 @@ Vector z_exact(Vector const& X, double t, int tag)
   double w2 = 2.0;
   int dim = X.size();
   int LZ = 3*(dim-1);
-  Vector v(Vector::Zero(LZ)); v << 0.0, 0.0, 10.0;
+  Vector v(Vector::Zero(LZ)); //v << 0.0, 0.0, 10.0;
   //if (t > 0){
   //  v(2) = w2;
   //}
@@ -1339,7 +1339,7 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
       V(0) = -0.01; V(1) = -0.01;
     }
     else if (tag == 103){
-      V(0) = -0.0; V(1) = 0.0;
+      V(0) = -0.5; V(1) = 0.5;
     }
     V = Pr*V;
   }
