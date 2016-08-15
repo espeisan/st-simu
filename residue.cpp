@@ -1706,7 +1706,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       else if (is_bdf3 && time_step > 1){
         dZdt = 11./6.*dZdt - 7./6.*z_coefs_old/dt + 3./2.*z_coefs_om1/dt - 1./3.*z_coefs_om2/dt;
       }
-      MI = MI_tensor(MV[K],RV[K],dim);
+      MI = MI_tensor(MV[K],RV[K],dim,InTen[K]);
       FZsloc = MI*dZdt - MV[K]*Grav - Fpp - Fpw;
       Z3sloc = ddt_factor*MI/dt;
 //#ifdef FEP_HAS_OPENMP

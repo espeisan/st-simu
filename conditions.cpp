@@ -7,6 +7,7 @@ using namespace std;
 // space
 typedef Matrix<double, Dynamic,1,0,6,1>              Vector;
 typedef Matrix<double, Dynamic,Dynamic,RowMajor,3,3> Tensor;
+typedef Matrix<double, 3, 3> Tensor3;
 typedef Matrix<double, Dynamic,Dynamic,RowMajor,6,6> TensorZ;
 const double pi  = 3.141592653589793;
 const double pi2 = pi*pi;
@@ -38,7 +39,7 @@ Vector force_rgb(Vector const& Xi, Vector const& Xj, double const Ri, double con
                  Vector const& Gr, double const rhoj, double const rhof, double ep, double zeta);
 Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double const Rj,
                  double ep, double zeta);
-TensorZ MI_tensor(double M, double R, int dim);
+TensorZ MI_tensor(double M, double R, int dim, Tensor3 TI);
 Tensor RotM(double theta, int dim);
 Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag);
 
@@ -1034,7 +1035,7 @@ double pho(Vector const& X, int tag)
 {
 //  if (tag == 15)
 //  {
-    return 0.0;//e3;///1e4;
+    return 1.0;//e3;///1e4;
 //  }
 //  else
 //  {
@@ -1103,8 +1104,32 @@ Vector u_exact(Vector const& X, double t, int tag)
 {
   double x = X(0);
   double y = X(1);
+  double un = 998*9.8*2.85e-4*2.85e-4/(3*1e-3);
+  double w1 = 0.0, w2 = 1.0, R1 = .25, R2 = 1;
   //Vector v(Vector::Ones(X.size()));  v << 1 , 2;
   Vector v(Vector::Zero(X.size()));
+  double r  = sqrt(x*x+y*y);
+  double Fr = (R2*w2-R1*w1)*(r-R1)/(R2-R1) + R1*w1;
+  double Lr = r*w2;
+  double nu = muu(tag)/pho(X,tag);
+  double C  = 78.0;
+  double uc = exp(-C*nu*t)*(Fr-Lr)+Lr;
+  v(0) = -y*Lr/r;
+  v(1) =  x*Lr/r;
+  if ( t == 0 ){
+    if (tag == 1){
+      v(0) = -w2*y;
+      v(1) =  w2*x;
+    }
+    else if (tag == 1 && t >= 3 && false){
+      v(0) =  w2*y;
+      v(1) = -w2*x;
+    }
+    else{
+      v(0) = 0;
+      v(1) = 0;
+    }
+  }
   return v;
 }
 
@@ -1125,10 +1150,10 @@ Vector z_exact(Vector const& X, double t, int tag)
   double w2 = 2.0;
   int dim = X.size();
   int LZ = 3*(dim-1);
-  Vector v(Vector::Zero(LZ)); //v << 0.0, 0.0, 10.0;
-  //if (t > 0){
-  //  v(2) = w2;
-  //}
+  Vector v(Vector::Zero(LZ)); //v << 0, 0, 10;
+  if (t > 0){
+    v(2) = w2;
+  }
   //Vector v(Vector::Ones(LZ));
   return v;
 }
@@ -1294,15 +1319,16 @@ Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double con
   return f;
 }
 
-TensorZ MI_tensor(double M, double R, int dim)
+TensorZ MI_tensor(double M, double R, int dim, Tensor3 TI)
 {
   TensorZ MI(TensorZ::Zero(3*(dim-1),3*(dim-1)));
   if (dim == 2){
-    MI(0,0) = M; MI(1,1) = M; MI(2,2) = 0.5*M*R*R;
+    MI(0,0) = M; MI(1,1) = M; MI(2,2) = TI(2,2); //MI(2,2) = 0.5*M*R*R;
   }
-  else if(dim == 3){
+  else if (dim == 3){
     MI(0,0) = M; MI(1,1) = M; MI(2,2) = M;
-    MI(3,3) = 0.4*M*R*R; MI(4,4) = 0.4*M*R*R; MI(5,5) = 0.4*M*R*R;
+    MI.block(3,3,5,5) = TI;
+    //MI(3,3) = 0.4*M*R*R; MI(4,4) = 0.4*M*R*R; MI(5,5) = 0.4*M*R*R;
   }
   return MI;
 }

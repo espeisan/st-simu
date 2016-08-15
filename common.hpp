@@ -56,6 +56,7 @@ typedef Matrix<MatrixXd, Dynamic,1>  VecOfMat;
 // space
 typedef Matrix<double, Dynamic,1,0,6,1>              Vector;  //6 is _MaxRows in the dynamic option
 typedef Matrix<double, Dynamic,Dynamic,RowMajor,3,3> Tensor;
+typedef Matrix<double, 3, 3> Tensor3;
 typedef Matrix<double, Dynamic,Dynamic,RowMajor,6,6> TensorZ;
 
 template<class Vec, class T>
@@ -123,7 +124,7 @@ Vector force_rgb(Vector const& Xi, Vector const& Xj, double const Ri, double con
                  Vector const& Gr, double const rhoj, double const rhof, double ep, double zeta);
 Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double const Rj,
                  double ep, double zeta);
-TensorZ MI_tensor(double M, double R, int dim);
+TensorZ MI_tensor(double M, double R, int dim, Tensor3 TI);
 Tensor RotM(double theta, int dim);
 Vector SlipVel(Vector const& X, Vector const& XG, int dim, int tag);
 Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag);
@@ -445,6 +446,8 @@ public:
   void forceDirichlet();
   PetscErrorCode updateSolidVel();
   void getSolidVolume();
+  void getSolidCentroid();
+  void getSolidInertiaTensor();
   PetscErrorCode moveCenterMass(double vtheta);
   PetscErrorCode updateSolidMesh();
   PetscErrorCode velNoSlip(Vec const& Vec_uzp, Vec const& Vec_sv, Vec &Vec_uzp_ns);
@@ -645,6 +648,7 @@ public:
   std::vector<Vector3d>  XG_0, XG_1, XG_aux;
   double                 hme, hmn, hmx;
   std::vector<double>    theta_0, theta_1, theta_aux;
+  std::vector<Tensor3>   InTen;
   //bool                   casevar = true, casevarc = true; //case variable or const to H solid vel functional
 
   // mesh alias

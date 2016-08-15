@@ -266,8 +266,8 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
-  is_mr_ab           = PETSC_TRUE;
-  is_bdf3            = PETSC_FALSE;
+  is_mr_ab           = PETSC_FALSE;
+  is_bdf3            = PETSC_TRUE;
   is_bdf2            = PETSC_FALSE;
   is_bdf2_bdfe       = PETSC_FALSE;
   is_bdf2_ab         = PETSC_FALSE;
@@ -1857,6 +1857,16 @@ PetscErrorCode AppCtx::solveTimeProblem()
   if (print_to_matlab)
     printMatlabLoader();
 
+  getSolidVolume();
+  getSolidCentroid();
+  getSolidInertiaTensor();
+
+  for (int K = 0; K < N_Solids; K++){
+    cout << VV[K] <<  endl;
+    cout << InTen[K] << endl;
+    cout << XG_0[K].transpose() << endl;
+  }
+
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // Solve nonlinear system
   //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1864,6 +1874,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
   printf("initial volume: %.15lf \n", initial_volume);
   current_time = 0;
   time_step = 0;
+
   double Qmax = 0;
   double steady_error = 1;
   setInitialConditions();  //called only here
@@ -2744,16 +2755,24 @@ double AppCtx::getMeshVolume()
 
 void AppCtx::getSolidVolume()
 {
+  VV.assign(N_Solids,0.0);
+
+#ifdef FEP_HAS_OPENMP
+  FEP_PRAGMA_OMP(parallel default(none))
+#endif
+  {
   MatrixXd            x_coefs_c(nodes_per_cell, dim);
   MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
-  Tensor              F_c(dim,dim), invF_c(dim,dim), invFT_c(dim,dim);
+  Tensor              F_c(dim,dim);
   VectorXi            cell_nodes(nodes_per_cell);
   double              Jx;
   int                 tag, nod_id;
-  VV.assign(N_Solids,0.0);
+  Vector              Xqp(dim), Xqp3(Vector::Zero(3));
 
-  cell_iterator cell = mesh->cellBegin();
-  cell_iterator cell_end = mesh->cellEnd();
+  const int tid = omp_get_thread_num();
+  const int nthreads = omp_get_num_threads();
+  cell_iterator cell = mesh->cellBegin(tid,nthreads);
+  cell_iterator cell_end = mesh->cellEnd(tid,nthreads);
   for (; cell != cell_end; ++cell)
   {
     tag = cell->getTag();
@@ -2768,10 +2787,53 @@ void AppCtx::getSolidVolume()
         F_c    = x_coefs_c_trans * dLqsi_err[qp];
         Jx     = F_c.determinant();
         VV[nod_id-1] += Jx * quadr_err->weight(qp);
-
       } // fim quadratura
     }
   } // end elementos
+  }
+}
+
+void AppCtx::getSolidCentroid()
+{
+  Vector XG(Vector::Zero(3));
+  XG_0.assign(N_Solids,XG);
+
+#ifdef FEP_HAS_OPENMP
+  FEP_PRAGMA_OMP(parallel default(none))
+#endif
+  {
+  MatrixXd            x_coefs_c(nodes_per_cell, dim);
+  MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
+  Tensor              F_c(dim,dim);
+  VectorXi            cell_nodes(nodes_per_cell);
+  double              Jx;
+  int                 tag, nod_id;
+  Vector              Xqp(dim), Xqp3(Vector::Zero(3));
+
+  const int tid = omp_get_thread_num();
+  const int nthreads = omp_get_num_threads();
+  cell_iterator cell = mesh->cellBegin(tid,nthreads);
+  cell_iterator cell_end = mesh->cellEnd(tid,nthreads);
+  for (; cell != cell_end; ++cell)
+  {
+    tag = cell->getTag();
+    nod_id = is_in_id(tag, solidonly_tags);
+    if (nod_id){
+      mesh->getCellNodesId(&*cell, cell_nodes.data());
+      mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
+      x_coefs_c_trans = x_coefs_c.transpose();
+
+      for (int qp = 0; qp < n_qpts_err; ++qp)
+      {
+        F_c    = x_coefs_c_trans * dLqsi_err[qp];
+        Jx     = F_c.determinant();
+        Xqp     = x_coefs_c_trans * qsi_err[qp];
+        Xqp3(0) = Xqp(0); Xqp3(1) = Xqp(1); if (dim == 3) Xqp3(2) = Xqp(2);
+        XG_0[nod_id-1] += Xqp3 * Jx * quadr_err->weight(qp)/VV[nod_id-1];
+      } // fim quadratura
+    }
+  } // end elementos
+  }
 }
 
 Vector AppCtx::getAreaMassCenterSolid(int sol_id, double &A){
@@ -3252,6 +3314,58 @@ PetscErrorCode AppCtx::plotFiles()
   if (is_slipv) VecRestoreArray(Vec_slipv_0, &vs_array);
 
   PetscFunctionReturn(0);
+}
+
+void AppCtx::getSolidInertiaTensor()
+{
+  Tensor Z(3,3);
+  Z.setZero();
+  InTen.assign(N_Solids,Z);
+
+#ifdef FEP_HAS_OPENMP
+  FEP_PRAGMA_OMP(parallel default(none))
+#endif
+  {
+  MatrixXd            x_coefs_c(nodes_per_cell, dim);
+  MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
+  Tensor              F_c(dim,dim);
+  VectorXi            cell_nodes(nodes_per_cell);
+  double              Jx, rho;
+  int                 tag, nod_id, delta_ij;
+  Vector              Xqp(dim), Xqp3(Vector::Zero(3));
+
+  const int tid = omp_get_thread_num();
+  const int nthreads = omp_get_num_threads();
+  cell_iterator cell = mesh->cellBegin(tid,nthreads);
+  cell_iterator cell_end = mesh->cellEnd(tid,nthreads);
+  for (; cell != cell_end; ++cell)
+  {
+    tag = cell->getTag();
+    nod_id = is_in_id(tag, solidonly_tags);
+    if (nod_id){
+      mesh->getCellNodesId(&*cell, cell_nodes.data());
+      mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
+      x_coefs_c_trans = x_coefs_c.transpose();
+      rho = MV[nod_id-1]/VV[nod_id-1];
+
+      for (int qp = 0; qp < n_qpts_err; ++qp)
+      {
+        F_c     = x_coefs_c_trans * dLqsi_err[qp];
+        Jx      = F_c.determinant();
+        Xqp     = x_coefs_c_trans * qsi_err[qp];
+        Xqp3(0) = Xqp(0); Xqp3(1) = Xqp(1); if (dim == 3) Xqp3(2) = Xqp(2);
+        for (int i = 0; i < 3; i++){
+          for (int j = 0; j < 3; j++){
+            delta_ij = i == j;
+            InTen[nod_id-1](i,j) += rho*( (Xqp3-XG_0[nod_id-1]).squaredNorm()*delta_ij
+                                         -(Xqp3(i)-XG_0[nod_id-1](i))*(Xqp3(j)-XG_0[nod_id-1](j))
+                                        ) * Jx * quadr_err->weight(qp);
+          } // end i
+        } //end j
+      } // end quadrature
+    }
+  } // end elements
+  }
 }
 
 void AppCtx::freePetscObjs()
