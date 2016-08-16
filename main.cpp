@@ -1677,7 +1677,10 @@ PetscErrorCode AppCtx::setInitialConditions()
           VecCopy(Vec_x_0, Vec_x_aux);
           copyVec2Mesh(Vec_x_1);
           VecCopy(Vec_x_1, Vec_x_0);
-          if (N_Solids) {XG_aux = XG_0; XG_0 = XG_1;}
+          if (N_Solids){
+            XG_aux = XG_0; XG_0 = XG_1;
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+          }
           VecCopy(Vec_uzp_1, Vec_uzp_0);
           //View(Vec_uzp_0,"matrizes/uzp_0.m","uzp0");
           //View(Vec_duzp_0,"matrizes/duzp_0.m","duzp0");
@@ -1721,7 +1724,10 @@ PetscErrorCode AppCtx::setInitialConditions()
           /*///-----
 
           // calc V^{n+1} and update with D_{3}X^{n+1} = dt*V^{n+1}
-          if (N_Solids) moveCenterMass(0.0);
+          if (N_Solids){
+            moveCenterMass(0.0);
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+          }
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.0, Vec_v_1, current_time);  //vtheta = 0 porque Vec_uzp_0 JÁ É o extrapolado
           VecCopy(Vec_v_1, Vec_x_1);
           VecScale(Vec_x_1, 6./11.*dt);
@@ -1898,7 +1904,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecAXPY(Vec_x_1,-1.0,Vec_x_0);
       copyMesh2Vec(Vec_x_cur);
       // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
-      if (N_Solids) moveCenterMass(2.0);
+      if (N_Solids){
+        moveCenterMass(2.0);
+        if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+      }
       calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
       VecCopy(Vec_v_1, Vec_x_1);
       VecScale(Vec_x_1, 2./3.*dt);
@@ -1920,7 +1929,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
       VecScale(Vec_x_1, 1.5);
       VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
       copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
-      if (N_Solids) moveCenterMass(1.5);
+      if (N_Solids){
+        moveCenterMass(1.5);
+        if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+      }
       calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
       VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
       if (N_Solids && false){
@@ -1950,7 +1962,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
     copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
     //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
     // extrapolate center of mass
-    if (N_Solids) moveCenterMass(1.5);
+    if (N_Solids){
+      moveCenterMass(1.5);
+      if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+    }
     calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
     VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
     VecCopy(Vec_uzp_1, Vec_uzp_0);
@@ -2008,7 +2023,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
           filv << current_time << " ";
           for (int S = 0; S < (N_Solids-1); S++){
             Xgg = XG_0[S];
-            filg << Xgg(0) << " " << Xgg(1) << " "; if (dim == 3){filg << Xgg(2) << " ";} filg << " " << VV[S] << " " << theta_0[S];
+            filg << Xgg(0) << " " << Xgg(1) << " "; if (dim == 3){filg << Xgg(2) << " ";} filg << " " << VV[S] << " " << theta_0[S] << " ";
             filv << v_coeffs_s(LZ*S) << " " << v_coeffs_s(LZ*S+1) << " " << v_coeffs_s(LZ*S+2) << " ";
           }
           Xgg = XG_0[N_Solids-1];
@@ -2167,7 +2182,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
           VecAXPY(Vec_x_1,-1.0,Vec_x_0);
           copyMesh2Vec(Vec_x_cur);
           // calc V^{n+1} and update with D_{2}X^{n+1} = dt*V^{n+1}
-          if (N_Solids) moveCenterMass(2.0);
+          if (N_Solids){
+            moveCenterMass(2.0);
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+          }
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 2.0, Vec_v_1, current_time);
           VecCopy(Vec_v_1, Vec_x_1);
           VecScale(Vec_x_1, 2./3.*dt);
@@ -2189,7 +2207,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
           VecScale(Vec_x_1, 1.5);
           VecAXPY(Vec_x_1,-0.5,Vec_x_0);  // \bar{X}^(n+1/2)=1.5*X^(n)-0.5X^(n-1)
           copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
-          if (N_Solids) moveCenterMass(1.5);
+          if (N_Solids){
+            moveCenterMass(1.5);
+            if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+          }
           calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_1, current_time); // Adams-Bashforth
           VecWAXPY(Vec_x_1, dt, Vec_v_1, Vec_x_0); // Vec_x_1 = Vec_v_1*dt + Vec_x_0
           if (N_Solids && false){
@@ -2227,7 +2248,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
         /*///-----
 
         // calc V^{n+1} and update with D_{3}X^{n+1} = dt*V^{n+1}
-        if (N_Solids) moveCenterMass(0.0);
+        if (N_Solids){
+          moveCenterMass(0.0);
+          if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+        }
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.0, Vec_v_1, current_time);  //comentado?
         VecCopy(Vec_v_1, Vec_x_1);
         VecScale(Vec_x_1, 6./11.*dt);
@@ -2254,7 +2278,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
         //velNoSlip(Vec_uzp_0,Vec_slipv_0,Vec_uzp_0_ns);velNoSlip(Vec_uzp_1,Vec_slipv_1,Vec_uzp_1_ns);
         // extrapolate center of mass
-        if (N_Solids) moveCenterMass(1.5);
+        if (N_Solids){
+          moveCenterMass(1.5);
+          if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+        }
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
         if (N_Solids && false){
@@ -2267,9 +2294,12 @@ PetscErrorCode AppCtx::solveTimeProblem()
       {
         //VecCopy(Vec_x_0,Vec_x_1);
         copyMesh2Vec(Vec_x_0);          //copy current mesh to Vec_x_0
+        if (N_Solids){
+          moveCenterMass(1.0);
+          if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+        }
         calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, current_time); // Adams-Bashforth
         VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
-        if (N_Solids){moveCenterMass(1.0);}
       }
 
 /*

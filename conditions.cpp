@@ -1108,7 +1108,7 @@ Vector u_exact(Vector const& X, double t, int tag)
   double w1 = 0.0, w2 = 1.0, R1 = .25, R2 = 1;
   //Vector v(Vector::Ones(X.size()));  v << 1 , 2;
   Vector v(Vector::Zero(X.size()));
-  double r  = sqrt(x*x+y*y);
+/*  double r  = sqrt(x*x+y*y);
   double Fr = (R2*w2-R1*w1)*(r-R1)/(R2-R1) + R1*w1;
   double Lr = r*w2;
   double nu = muu(tag)/pho(X,tag);
@@ -1129,7 +1129,7 @@ Vector u_exact(Vector const& X, double t, int tag)
       v(0) = 0;
       v(1) = 0;
     }
-  }
+  }*/
   return v;
 }
 
@@ -1364,8 +1364,8 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
     if (false && tag == 100){
       V(0) = -0.01; V(1) = -0.01;
     }
-    else if (tag == 103){
-      V(0) = -0.5; V(1) = 0.5;
+    else if (tag == 103 || tag == 203){
+      V(0) = 0.5; V(1) = 0.5;
     }
     V = Pr*V;
   }
