@@ -1357,7 +1357,7 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
       if (force_mesh_velocity)
       {
         VecGetValues(Vec_x_0, dim, node_dofs_mesh.data(), X0.data());  //node mesh vel value
-
+        if (N_Solids && is_slipv) VecCopy(Vec_slipv_0, Vec_slipv_1);
         //k1 = v_exact(X0,tt,tag);
         //k2 = v_exact(X0+0.5*k1*dt,tt+0.5*dt,tag);
         //k3 = v_exact(X0+0.5*k2*dt,tt+0.5*dt,tag);

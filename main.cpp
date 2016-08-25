@@ -267,14 +267,14 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
   is_mr_ab           = PETSC_FALSE;
-  is_bdf3            = PETSC_TRUE;
+  is_bdf3            = PETSC_FALSE;
   is_bdf2            = PETSC_FALSE;
   is_bdf2_bdfe       = PETSC_FALSE;
   is_bdf2_ab         = PETSC_FALSE;
   is_bdf_cte_vel     = PETSC_FALSE;
   is_bdf_euler_start = PETSC_FALSE;
   is_bdf_extrap_cte  = PETSC_FALSE;
-  is_basic           = PETSC_FALSE;
+  is_basic           = PETSC_TRUE;
 
   if ((is_bdf2 && utheta!=1) || (is_bdf3 && utheta!=1))
   {
@@ -2023,15 +2023,15 @@ PetscErrorCode AppCtx::solveTimeProblem()
           filv << current_time << " ";
           for (int S = 0; S < (N_Solids-1); S++){
             Xgg = XG_0[S];
-            filg << Xgg(0) << " " << Xgg(1) << " "; if (dim == 3){filg << Xgg(2) << " ";} filg << " " << VV[S] << " " << theta_0[S] << " ";
+            filg << Xgg(0) << " " << Xgg(1); if (dim == 3){filg << " " << Xgg(2);} filg << " " << VV[S] << " " << theta_0[S] << " ";
             filv << v_coeffs_s(LZ*S) << " " << v_coeffs_s(LZ*S+1) << " " << v_coeffs_s(LZ*S+2) << " ";
           }
           Xgg = XG_0[N_Solids-1];
-          filg << Xgg(0) << " " << Xgg(1); if (dim == 3){filg << " "<< Xgg(2);} filg << " " << VV[N_Solids-1] << " " << theta_0[N_Solids-1] << endl;
+          filg << Xgg(0) << " " << Xgg(1); if (dim == 3){filg << " " << Xgg(2);} filg << " " << VV[N_Solids-1] << " " << theta_0[N_Solids-1] << endl;
           filv << v_coeffs_s(LZ*(N_Solids-1)) << " " << v_coeffs_s(LZ*(N_Solids-1)+1) << " "
                << v_coeffs_s(LZ*(N_Solids-1)+2);
           if (dim == 3){
-            filv << v_coeffs_s(LZ*(N_Solids-1)+3) << " " << v_coeffs_s(LZ*(N_Solids-1)+4) << " "
+            filv << " " << v_coeffs_s(LZ*(N_Solids-1)+3) << " " << v_coeffs_s(LZ*(N_Solids-1)+4) << " "
                 << v_coeffs_s(LZ*(N_Solids-1)+5);
           }
           filv << endl;
@@ -2342,6 +2342,9 @@ PetscErrorCode AppCtx::solveTimeProblem()
     else // if it's not ALE
     {
       VecCopy(Vec_uzp_1, Vec_uzp_0); //VecCopy(Vec_up_1, Vec_up_0);
+      if (N_Solids){
+        if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
+      }
     }
 
 
@@ -2372,9 +2375,11 @@ PetscErrorCode AppCtx::solveTimeProblem()
   //
 
   // PRINT AGAIN
-  if (false)
+  if (false && !unsteady)
   {
-    if (family_files)
+    plotFiles();
+
+    if (family_files && false)  // borrar este if
     {
       double  *q_array;
       double  *nml_array;
@@ -3396,6 +3401,54 @@ void AppCtx::getSolidInertiaTensor()
     }
   } // end elements
   }
+}
+
+void AppCtx::getFromBSV() //Body Slip Velocity
+{
+  int                 tag;
+  bool                is_slipvel;
+  VectorXi            mapM_f(dim*nodes_per_facet);
+  MatrixXd            x_coefs_f(n_dofs_v_per_facet/dim, dim), sv_coefs_f(n_dofs_v_per_facet/dim, dim);
+  Tensor              F_f(dim,dim-1);
+  Vector              Xqp(dim), Xqp3(Vector::Zero(3)), Nr(dim), Vs(dim);
+  const double        Pi = 3.141592653589793;
+
+
+  facet_iterator facet = mesh->facetBegin();
+  facet_iterator facet_end = mesh->facetEnd();  // the next if controls the for that follows
+
+  if (slipvel_tags.size() != 0)
+  for (; facet != facet_end; ++facet)
+  {
+    tag = facet->getTag();
+    is_slipvel = is_in_id(tag, slipvel_tags);
+    if(!is_slipvel)
+      continue;
+
+    dof_handler[DH_MESH].getVariable(VAR_M).getFacetDofs(mapM_f.data(), &*facet);  //cout << mapM_f << endl;
+    VecGetValues(Vec_x_0, mapM_f.size(), mapM_f.data(), x_coefs_f.data());
+    VecGetValues(Vec_slipv_0, mapM_f.size(), mapM_f.data(), sv_coefs_f.data());
+
+
+    // Quadrature
+    for (int qp = 0; qp < n_qpts_facet; ++qp)
+    {
+      F_f     = x_coefs_f * dLqsi_f[qp];
+      Jx      = F_f.determinant();
+      Xqp     = x_coefs_f * qsi_f[qp];
+      Xqp3(0) = Xqp(0); Xqp3(1) = Xqp(1); if (dim == 3) Xqp3(2) = Xqp(2);
+      Nr      = Xqp;
+      Nr.normalize();
+
+      Vs = SlipVel(X, XG_0[is_slipvel-1], Nr, dim, tag);
+
+      Vsol += Vs * Jx * quadr_facet->weight(qp) / (RV[is_slipvel-1]*RV[is_slipvel-1]);
+      Wsol += Nr.cross(Vs) * Jx * quadr_facet->weight(qp) / (RV[is_slipvel-1]*RV[is_slipvel-1]*RV[is_slipvel-1]);
+
+    }
+  }
+  Vsol = -(1.0/(4.0*Pi))*Vsol;
+  Wsol = -(3.0/(8.0*Pi))*Wsol;
 }
 
 void AppCtx::freePetscObjs()

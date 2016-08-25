@@ -1527,6 +1527,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
 
   // LOOP FOR SOLID-ONLY CONTRIBUTION //////////////////////////////////////////////////
+  if (N_Solids && unsteady)
   {
     VectorXd   FZsloc = VectorXd::Zero(LZ);
     VectorXi   mapZ_s(LZ);
@@ -1707,8 +1708,8 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         dZdt = 11./6.*dZdt - 7./6.*z_coefs_old/dt + 3./2.*z_coefs_om1/dt - 1./3.*z_coefs_om2/dt;
       }
       MI = MI_tensor(MV[K],RV[K],dim,InTen[K]);
-      FZsloc = MI*dZdt - MV[K]*Grav - Fpp - Fpw;
-      Z3sloc = ddt_factor*MI/dt;
+      FZsloc = (MI*dZdt - MV[K]*Grav - Fpp - Fpw) * unsteady;
+      Z3sloc = ddt_factor*MI/dt * unsteady;
 //#ifdef FEP_HAS_OPENMP
 //      FEP_PRAGMA_OMP(critical)
 //#endif
