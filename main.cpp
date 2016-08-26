@@ -2341,6 +2341,8 @@ PetscErrorCode AppCtx::solveTimeProblem()
     }//end if ale
     else // if it's not ALE
     {
+      getFromBSV();
+      cout << Vsol.transpose() << "   " << Wsol.transpose() <<  endl;
       VecCopy(Vec_uzp_1, Vec_uzp_0); //VecCopy(Vec_up_1, Vec_up_0);
       if (N_Solids){
         if (is_slipv) VecCopy(Vec_slipv_1,Vec_slipv_0);
@@ -2792,9 +2794,9 @@ void AppCtx::getSolidVolume()
 {
   VV.assign(N_Solids,0.0);
 
-#ifdef FEP_HAS_OPENMP
-  FEP_PRAGMA_OMP(parallel default(none))
-#endif
+//#ifdef FEP_HAS_OPENMP
+//  FEP_PRAGMA_OMP(parallel default(none))
+//#endif
   {
   MatrixXd            x_coefs_c(nodes_per_cell, dim);
   MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
@@ -2833,9 +2835,9 @@ void AppCtx::getSolidCentroid()
   Vector XG(Vector::Zero(3));
   XG_0.assign(N_Solids,XG);
 
-#ifdef FEP_HAS_OPENMP
-  FEP_PRAGMA_OMP(parallel default(none))
-#endif
+//#ifdef FEP_HAS_OPENMP
+//  FEP_PRAGMA_OMP(parallel default(none))
+//#endif
   {
   MatrixXd            x_coefs_c(nodes_per_cell, dim);
   MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
@@ -3357,9 +3359,9 @@ void AppCtx::getSolidInertiaTensor()
   Z.setZero();
   InTen.assign(N_Solids,Z);
 
-#ifdef FEP_HAS_OPENMP
-  FEP_PRAGMA_OMP(parallel default(none))
-#endif
+//#ifdef FEP_HAS_OPENMP
+//  FEP_PRAGMA_OMP(parallel default(none))
+//#endif
   {
   MatrixXd            x_coefs_c(nodes_per_cell, dim);
   MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
@@ -3409,10 +3411,13 @@ void AppCtx::getFromBSV() //Body Slip Velocity
   bool                is_slipvel;
   VectorXi            mapM_f(dim*nodes_per_facet);
   MatrixXd            x_coefs_f(n_dofs_v_per_facet/dim, dim), sv_coefs_f(n_dofs_v_per_facet/dim, dim);
-  Tensor              F_f(dim,dim-1);
+  Tensor              F_f(dim,dim-1), fff_f(dim-1,dim-1);
   Vector              Xqp(dim), Xqp3(Vector::Zero(3)), Nr(dim), Vs(dim);
   const double        Pi = 3.141592653589793;
+  double              Jx;
 
+  Vsol = Vector3d::Zero(3);
+  Wsol = Vector3d::Zero(3);
 
   facet_iterator facet = mesh->facetBegin();
   facet_iterator facet_end = mesh->facetEnd();  // the next if controls the for that follows
@@ -3433,17 +3438,23 @@ void AppCtx::getFromBSV() //Body Slip Velocity
     // Quadrature
     for (int qp = 0; qp < n_qpts_facet; ++qp)
     {
-      F_f     = x_coefs_f * dLqsi_f[qp];
-      Jx      = F_f.determinant();
-      Xqp     = x_coefs_f * qsi_f[qp];
+      F_f     = x_coefs_f.transpose() * dLqsi_f[qp];
+      fff_f   = F_f.transpose()*F_f;
+      Jx      = sqrt(fff_f.determinant());
+      Xqp     = x_coefs_f.transpose() * qsi_f[qp];
       Xqp3(0) = Xqp(0); Xqp3(1) = Xqp(1); if (dim == 3) Xqp3(2) = Xqp(2);
-      Nr      = Xqp;
-      Nr.normalize();
 
-      Vs = SlipVel(X, XG_0[is_slipvel-1], Nr, dim, tag);
+      //Nr      = Xqp;
+      //Nr.normalize();  cout << Nr.transpose() << "   ";
+      Nr      = cross(F_f.col(0), F_f.col(1));
+      Nr.normalize();  //cout << Nr.transpose() << endl;
+
+      Vs = SlipVel(Xqp, XG_0[is_slipvel-1], Nr, dim, tag);
+      //cout << Vs.dot(Nr) << "   " << Vs.dot(Xqp) << "   " << Xqp.transpose() << "   " << Xqp.norm() << endl;
+      //Vs << 1, 0, 0;
 
       Vsol += Vs * Jx * quadr_facet->weight(qp) / (RV[is_slipvel-1]*RV[is_slipvel-1]);
-      Wsol += Nr.cross(Vs) * Jx * quadr_facet->weight(qp) / (RV[is_slipvel-1]*RV[is_slipvel-1]*RV[is_slipvel-1]);
+      Wsol += cross(Nr,Vs) * Jx * quadr_facet->weight(qp) / (RV[is_slipvel-1]*RV[is_slipvel-1]*RV[is_slipvel-1]);
 
     }
   }

@@ -453,6 +453,7 @@ public:
   PetscErrorCode velNoSlip(Vec const& Vec_uzp, Vec const& Vec_sv, Vec &Vec_uzp_ns);
   PetscErrorCode plotFiles();
   Vector vectorSolidMesh(int const K, Point const* point, int const vs);
+  void getFromBSV();
   //void printContactAngle(bool _print);
 
   void computeError(Vec const& Vec_x, Vec &Vec_up_1, double tt);
@@ -710,6 +711,8 @@ public:
   double sizeField_s(Vector coords);
   PetscErrorCode meshAdapt_s();
   void smoothsMesh_s(Vec &Vec_normal_, Vec &Vec_x_);
+
+  Vector3d Vsol, Wsol;
 
 };
 

@@ -1713,7 +1713,7 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
     }
     V = Pr*V;
   }
-
+  //V.normalize();
   return V;
 }
 
