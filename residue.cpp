@@ -1535,10 +1535,13 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     VectorXd   z_coefs_mid(LZ), z_coefs_olJ(LZ), z_coefs_neJ(LZ), z_coefs_miJ(LZ);
     Vector     dZdt(LZ);
     Vector     Grav(LZ), Fpp(LZ), Fpw(LZ);
-    TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ);
+    TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ), dFpp(LZ,LZ);
     TensorZ    MI = TensorZ::Zero(LZ,LZ);
     double     ddt_factor, dJK;
-    bool       act;
+    bool       deltaDi, deltaLK, deltaLJ;
+    Vector3d   eJK;
+    double     zet = 0.01; //ep = 7.0e-6, epw = ep/10.0;
+    double gap, ep, R, visc;
 
     if (is_bdf2 && time_step > 0)
       ddt_factor = 1.5;
@@ -1547,15 +1550,26 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       ddt_factor = 11./6.;
     else
       ddt_factor = 1.;
-//    double     zet = 0.05, ep = 7.0e-6, epw = ep/10.0;
-    double gap, ep, R, visc;
 
     visc = muu(0);
 
     for (int K = 0; K < N_Solids; K++){
 
       Fpp  = Vector::Zero(LZ); Fpw = Vector::Zero(LZ);
+      dFpp = TensorZ::Zero(LZ,LZ);
       Grav = gravity(XG_mid[K], dim);
+
+      for (int C = 0; C < LZ; C++){
+        mapZ_s(C) = n_unknowns_u + n_unknowns_p + LZ*K + C;
+      }  //cout << mapZ_s << endl;
+      VecGetValues(Vec_uzp_0,    mapZ_s.size(), mapZ_s.data(), z_coefs_old.data());  //cout << z_coefs_old.transpose() << endl;
+      VecGetValues(Vec_uzp_k ,   mapZ_s.size(), mapZ_s.data(), z_coefs_new.data());  //cout << z_coefs_new.transpose() << endl;
+      VecGetValues(Vec_uzp_m1,   mapZ_s.size(), mapZ_s.data(), z_coefs_om1.data()); // bdf2,bdf3
+      if (is_bdf3){
+        VecGetValues(Vec_uzp_m2, mapZ_s.size(), mapZ_s.data(), z_coefs_om2.data()); // bdf2
+      }
+
+      z_coefs_mid = utheta*z_coefs_new + (1-utheta)*z_coefs_old;
 
       //Rep force Wang
 #if (false)
@@ -1693,58 +1707,63 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         }
       }
 #endif
-
-      for (int C = 0; C < LZ; C++){
-        mapZ_s(C) = n_unknowns_u + n_unknowns_p + LZ*K + C;
-      }  //cout << mapZ_s << endl;
-      VecGetValues(Vec_uzp_0,    mapZ_s.size(), mapZ_s.data(), z_coefs_old.data());  //cout << z_coefs_old.transpose() << endl;
-      VecGetValues(Vec_uzp_k ,   mapZ_s.size(), mapZ_s.data(), z_coefs_new.data());  //cout << z_coefs_new.transpose() << endl;
-      VecGetValues(Vec_uzp_m1,   mapZ_s.size(), mapZ_s.data(), z_coefs_om1.data()); // bdf2,bdf3
-      if (is_bdf3){
-        VecGetValues(Vec_uzp_m2, mapZ_s.size(), mapZ_s.data(), z_coefs_om2.data()); // bdf2
-      }
-
-      z_coefs_mid = utheta*z_coefs_new + (1-utheta)*z_coefs_old;
-
       //Rep force Buscaglia
 #if (true)
       for (int J = 0; J < N_Solids; J++){
         if (J != K){
-
-          for (int C = 0; C < LZ; C++){
-            mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*J + C;
-          }  //cout << mapZ_s << endl;
-          VecGetValues(Vec_uzp_0,    mapZ_J.size(), mapZ_J.data(), z_coefs_olJ.data());  //cout << z_coefs_old.transpose() << endl;
-          VecGetValues(Vec_uzp_k ,   mapZ_J.size(), mapZ_J.data(), z_coefs_neJ.data());  //cout << z_coefs_new.transpose() << endl;
-
-          z_coefs_miJ = utheta*z_coefs_neJ + (1-utheta)*z_coefs_olJ;
-
-          R   = std::max(RV[K],RV[J]);
-
-          dJK = (XG_mid[K]-XG_mid[J]).norm();
+          eJK = XG_mid[K]-XG_mid[J];
+          dJK = eJK.norm();
           ep  = dJK-(RV[K]+RV[J]);
-          act = ep < zeta;
-          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*(z_coefs_miJ-z_coefs_mid).norm();
-          Fpp += gap*(XG_mid[K]-XG_mid[J])/dJK;
+          if (ep < zet){
+            R = std::max(RV[K],RV[J]);
+            for (int C = 0; C < LZ; C++){
+              mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*J + C;
+            }
+            VecGetValues(Vec_uzp_0,    mapZ_J.size(), mapZ_J.data(), z_coefs_olJ.data());  //cout << z_coefs_old.transpose() << endl;
+            VecGetValues(Vec_uzp_k ,   mapZ_J.size(), mapZ_J.data(), z_coefs_neJ.data());  //cout << z_coefs_new.transpose() << endl;
+            z_coefs_miJ = utheta*z_coefs_neJ + (1-utheta)*z_coefs_olJ;
+            gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*(z_coefs_miJ-z_coefs_mid).norm();
+            Fpp.head(3) += gap*eJK/dJK;
+          }
         }
       }
+
+      for (int L = 0; L < N_Solids; L++){
+        deltaLK = L==K;
+        for (int J = 0; J < N_Solids; J++){
+          deltaLJ = L==J;
+          if (J != K){
+            eJK = XG_mid[K]-XG_mid[J];
+            dJK = eJK.norm();
+            ep  = dJK-(RV[K]+RV[J]);
+            if (ep <= zet){
+              R = std::max(RV[K],RV[J]); ep = zet;
+              for (int C = 0; C < LZ; C++){
+                mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*J + C;
+              }
+              VecGetValues(Vec_uzp_0,    mapZ_J.size(), mapZ_J.data(), z_coefs_olJ.data());  //cout << z_coefs_old.transpose() << endl;
+              VecGetValues(Vec_uzp_k ,   mapZ_J.size(), mapZ_J.data(), z_coefs_neJ.data());  //cout << z_coefs_new.transpose() << endl;
+              z_coefs_miJ = utheta*z_coefs_neJ + (1-utheta)*z_coefs_olJ;
+              gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*(z_coefs_miJ-z_coefs_mid).norm();
+              for (int C = 0; C < dim; C++){
+                for (int D = 0; D < dim; D++){
+                  for (int i = 0; i < dim; i++){
+                    deltaDi = D==i;
+                    dFpp(C,D) -= utheta*gap*deltaDi*(deltaLK-deltaLJ)/(z_coefs_miJ-z_coefs_mid).norm() * eJK(C)/dJK;
+                  }
+                }
+              }
+            }
+          }
+        }
+        for (int C = 0; C < LZ; C++){
+          mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*L + C;
+        }
+        MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
+
+      }
       { //This part is sensibly: the 3*N_Solids part depends on the gmsh structure box corner creation
-        Vector coor(dim);
-        Vector2d   Xj;  int widp = 0; //3*N_Solids
-        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << endl;
-        Xj << 2*coor[0]-XG_mid[K](0), XG_mid[K](1);   //cout << Xj.transpose() << endl;
-        Fpw += force_rgc(XG_mid[K], Xj, RV[K], RV[K], epw, zet);
-
-        Xj << XG_mid[K](0), 2*coor[1]-XG_mid[K](1);   //cout << Xj.transpose() << endl;
-        Fpw += force_rgc(XG_mid[K], Xj, RV[K], RV[K], epw, zet);
-
-        mesh->getNodePtr(widp+2)->getCoord(coor.data(),dim);  //cout << coor.transpose() << endl;
-        Xj << 2*coor[0]-XG_mid[K](0), XG_mid[K](1);   //cout << Xj.transpose() << endl;
-        Fpw += force_rgc(XG_mid[K], Xj, RV[K], RV[K], epw, zet);
-
-        Xj << XG_mid[K](0), 2*coor[1]-XG_mid[K](1);   //cout << Xj.transpose() << endl;
-        Fpw += force_rgc(XG_mid[K], Xj, RV[K], RV[K], epw, zet);
-
+        //cout << ep << " ";
         if ((Fpp.norm() != 0) || (Fpw.norm() != 0)){
           cout << K << "   " << Fpp.transpose() << "   " << Fpw.transpose() << endl;
         }

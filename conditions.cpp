@@ -250,7 +250,7 @@ Vector z_initial(Vector const& X, int tag)
 
 
 // solid asc 2d/////////////////////////////////////////////////////////////
-#if (false)
+#if (true)
 
 double pho(Vector const& X, int tag)
 {
@@ -516,19 +516,6 @@ Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double con
   }
   //else if (dij < Ri+Rj){cout << "ERROR: penetration!!!!!!!!!!!!!!!!" << endl;}
   return f;
-}
-
-TensorZ MI_tensor(double M, double R, int dim)
-{
-  TensorZ MI(TensorZ::Zero(3*(dim-1),3*(dim-1)));
-  if (dim == 2){
-    MI(0,0) = M; MI(1,1) = M; MI(2,2) = 0.4*M*R*R;
-  }
-  else if(dim == 3){
-    MI(0,0) = M; MI(1,1) = M; MI(2,2) = M;
-    MI(3,3) = 0.4*M*R*R; MI(4,4) = 0.4*M*R*R; MI(5,5) = 0.4*M*R*R;
-  }
-  return MI;
 }
 #endif
 
@@ -1376,7 +1363,7 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
 #endif
 
 // rot solid 3d slip vel/////////////////////////////////////////////////////////////
-#if (true)
+#if (false)
 
 double pho(Vector const& X, int tag)
 {
@@ -1718,3 +1705,59 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
 }
 
 #endif
+
+// General functions
+
+TensorZ MI_tensor(double M, double R, int dim, Tensor3 TI)
+{
+  TensorZ MI(TensorZ::Zero(3*(dim-1),3*(dim-1)));
+  if (dim == 2){
+    MI(0,0) = M; MI(1,1) = M; MI(2,2) = TI(2,2); //MI(2,2) = 0.5*M*R*R;
+  }
+  else if (dim == 3){
+    MI(0,0) = M; MI(1,1) = M; MI(2,2) = M;
+    MI.block(3,3,5,5) = TI;
+    //MI(3,3) = 0.4*M*R*R; MI(4,4) = 0.4*M*R*R; MI(5,5) = 0.4*M*R*R;
+  }
+  return MI;
+}
+
+Tensor RotM(double theta, int dim)
+{
+  Tensor M(Tensor::Zero(3,3));
+  if (dim == 2){
+    M(0,0) = cos(theta); M(0,1) = -sin(theta);
+    M(1,0) = sin(theta); M(1,1) =  cos(theta);
+  }
+  if (dim == 3){
+    cout << "Not yet" << endl;
+  }
+  return M;
+}
+
+Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag)
+{
+  Vector V(Vector::Zero(dim));
+  Vector X3(Vector::Zero(3));
+  Vector Xp(Vector::Zero(dim));
+
+  double alp = 1;
+  double bet = 1;
+
+  Tensor I(dim,dim);
+  I.setIdentity();
+  Tensor Pr = I - normal*normal.transpose();
+
+  if (dim == 3)
+  {
+    if (false && tag == 100){
+      V(0) = -0.01; V(1) = -0.01;
+    }
+    else if (tag == 103 || tag == 203){
+      V(0) = -1.0;
+    }
+    V = Pr*V;
+  }
+  //V.normalize();
+  return V;
+}
