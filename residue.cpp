@@ -1535,7 +1535,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     VectorXd   z_coefs_mid(LZ), z_coefs_olJ(LZ), z_coefs_neJ(LZ), z_coefs_miJ(LZ);
     Vector     dZdt(LZ);
     Vector     Grav(LZ), Fpp(LZ), Fpw(LZ);
-    TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ), dFpp(LZ,LZ);
+    TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ), dFpp(LZ,LZ), dFpw(LZ,LZ);
     TensorZ    MI = TensorZ::Zero(LZ,LZ);
     double     ddt_factor, dJK;
     bool       deltaDi, deltaLK, deltaLJ;
@@ -1555,8 +1555,8 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
     for (int K = 0; K < N_Solids; K++){
 
-      Fpp  = Vector::Zero(LZ); Fpw = Vector::Zero(LZ);
-      dFpp = TensorZ::Zero(LZ,LZ);
+      Fpp  = Vector::Zero(LZ);     Fpw  = Vector::Zero(LZ);
+      dFpp = TensorZ::Zero(LZ,LZ); dFpw = TensorZ::Zero(LZ,LZ);
       Grav = gravity(XG_mid[K], dim);
 
       for (int C = 0; C < LZ; C++){
@@ -1727,7 +1727,6 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           }
         }
       }
-
       for (int L = 0; L < N_Solids; L++){
         deltaLK = L==K;
         for (int J = 0; J < N_Solids; J++){
@@ -1760,10 +1759,40 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*L + C;
         }
         MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
-
       }
+
       { //This part is sensibly: the 3*N_Solids part depends on the gmsh structure box corner creation
         //cout << ep << " ";
+        Vector   coor(dim);
+        Vector3d Xkaux; int widp = 2*N_Solids; //choose the left-inferior corner as reference
+        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << "   ";
+        Xkaux << XG_mid[K](0), 2*coor[1]-XG_mid[K](1), 0.0;
+
+        eJK = XG_mid[K]-Xkaux;
+        dJK = eJK.norm();
+        ep  = dJK-(2*RV[K]);
+        if (ep < zet){
+          R = RV[K];
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*2*(z_coefs_mid).norm();
+          Fpw = gap*eJK/dJK;
+
+          for (int L = 0; L < N_Solids; L++){
+            deltaLK = L==K;
+            for (int C = 0; C < dim; C++){
+              for (int D = 0; D < dim; D++){
+                for (int i = 0; i < dim; i++){
+                  deltaDi = D==i;
+                  dFpw(C,D) -= 2*utheta*gap*deltaDi*(deltaLK)/(z_coefs_mid).norm() * eJK(C)/dJK;
+                }
+              }
+            }
+            for (int C = 0; C < LZ; C++){
+              mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*L + C;
+            }
+            MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
+          }
+        }
+
         if ((Fpp.norm() != 0) || (Fpw.norm() != 0)){
           cout << K << "   " << Fpp.transpose() << "   " << Fpw.transpose() << endl;
         }

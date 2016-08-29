@@ -386,7 +386,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   else
 	fluidonly_tags.clear();
 
-  solidonly_tags.resize(16);
+  solidonly_tags.resize(1e8);
   nmax = solidonly_tags.size();
   PetscOptionsGetIntArray(PETSC_NULL, "-sonly_tags", solidonly_tags.data(), &nmax, &flg_tags);
   if (flg_tags)
@@ -499,6 +499,9 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
     MV.resize(N_Solids); RV.resize(N_Solids); VV.resize(N_Solids);
     XG_1.resize(N_Solids); XG_0.resize(N_Solids); XG_aux.resize(N_Solids);
     theta_1.resize(N_Solids); theta_0.resize(N_Solids); theta_aux.resize(N_Solids);
+    //cout << MV[0] << " " << MV[1] << " " << MV[2] << " " << MV[3] <<  endl;
+    //cout << RV[0] << " " << RV[1] << " " << RV[2] << " " << RV[3] <<  endl;
+    //cout << VV[0] << " " << VV[1] << " " << VV[2] << " " << VV[3] <<  endl;
   }
 
   if (flg_hout){
