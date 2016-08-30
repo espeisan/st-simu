@@ -1714,8 +1714,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           eJK = XG_mid[K]-XG_mid[J];
           dJK = eJK.norm();
           ep  = dJK-(RV[K]+RV[J]);
-          if (ep < zet){
+          if (ep <= zet){
             R = std::max(RV[K],RV[J]);
+            //ep = zet;
             for (int C = 0; C < LZ; C++){
               mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*J + C;
             }
@@ -1736,14 +1737,15 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
             dJK = eJK.norm();
             ep  = dJK-(RV[K]+RV[J]);
             if (ep <= zet){
-              R = std::max(RV[K],RV[J]); ep = zet;
+              R = std::max(RV[K],RV[J]);
+              //ep = zet;
               for (int C = 0; C < LZ; C++){
                 mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*J + C;
               }
               VecGetValues(Vec_uzp_0,    mapZ_J.size(), mapZ_J.data(), z_coefs_olJ.data());  //cout << z_coefs_old.transpose() << endl;
               VecGetValues(Vec_uzp_k ,   mapZ_J.size(), mapZ_J.data(), z_coefs_neJ.data());  //cout << z_coefs_new.transpose() << endl;
               z_coefs_miJ = utheta*z_coefs_neJ + (1-utheta)*z_coefs_olJ;
-              gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*(z_coefs_miJ-z_coefs_mid).norm();
+              gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep));//*(z_coefs_miJ-z_coefs_mid).norm();
               for (int C = 0; C < dim; C++){
                 for (int D = 0; D < dim; D++){
                   for (int i = 0; i < dim; i++){
@@ -1764,18 +1766,19 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       { //This part is sensibly: the 3*N_Solids part depends on the gmsh structure box corner creation
         //cout << ep << " ";
         Vector   coor(dim);
-        Vector3d Xkaux; int widp = 2*N_Solids; //choose the left-inferior corner as reference
+        Vector3d Xkaux; int widp = 2*N_Solids;//2*N_Solids; //choose the left-inferior corner as reference
         mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << "   ";
         Xkaux << XG_mid[K](0), 2*coor[1]-XG_mid[K](1), 0.0;
 
         eJK = XG_mid[K]-Xkaux;
         dJK = eJK.norm();
         ep  = dJK-(2*RV[K]);
-        if (ep < zet){
+        if (ep <= zet){
           R = RV[K];
+          //ep = zet;
           gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*2*(z_coefs_mid).norm();
           Fpw = gap*eJK/dJK;
-
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep));//*(z_coefs_mid).norm();
           for (int L = 0; L < N_Solids; L++){
             deltaLK = L==K;
             for (int C = 0; C < dim; C++){
@@ -1794,7 +1797,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         }
 
         if ((Fpp.norm() != 0) || (Fpw.norm() != 0)){
-          cout << K << "   " << Fpp.transpose() << "   " << Fpw.transpose() << endl;
+          cout << K+1 << "   " << Fpp.transpose() << "   " << Fpw.transpose() << endl;
         }
       }
 #endif
