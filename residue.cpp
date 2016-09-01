@@ -375,7 +375,7 @@ PetscErrorCode AppCtx::formFunction_mesh(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
               {
                 for (int l = 0; l < dim; ++l)
                 {
-                  sigma_ck += dxV(l,c)*dxV(l,k);  // i think is dxV(c,l)*dxV(k,l);
+                  sigma_ck += dxV(l,c)*dxV(l,k);
                   if (c==k)
                   {
                     sigma_ck -= dxV(l,l);
@@ -1532,7 +1532,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     VectorXd   FZsloc = VectorXd::Zero(LZ);
     VectorXi   mapZ_s(LZ), mapZ_J(LZ);
     VectorXd   z_coefs_old(LZ), z_coefs_new(LZ), z_coefs_om1(LZ), z_coefs_om2(LZ);
-    VectorXd   z_coefs_mid(LZ), z_coefs_olJ(LZ), z_coefs_neJ(LZ), z_coefs_miJ(LZ);
+    VectorXd   z_coefs_mid(LZ), z_coefs_olJ(LZ), z_coefs_neJ(LZ), z_coefs_miJ(LZ), z_coefs_miK(LZ);
     Vector     dZdt(LZ);
     Vector     Grav(LZ), Fpp(LZ), Fpw(LZ);
     TensorZ    Z3sloc = TensorZ::Zero(LZ,LZ), dFpp(LZ,LZ), dFpw(LZ,LZ);
@@ -1709,6 +1709,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 #endif
       //Rep force Buscaglia
 #if (true)
+      zet = 0.01;
       for (int J = 0; J < N_Solids; J++){
         if (J != K){
           eJK = XG_mid[K]-XG_mid[J];
@@ -1764,12 +1765,41 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       }
 
       { //This part is sensibly: the 3*N_Solids part depends on the gmsh structure box corner creation
-        //cout << ep << " ";
+        zet = 0.2;
         Vector   coor(dim);
-        Vector3d Xkaux; int widp = 2*N_Solids;//2*N_Solids; //choose the left-inferior corner as reference
-        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << "   ";
+        Vector3d Xkaux; int widp = 0;//2*N_Solids; //choose the left-inferior corner as reference
+        // bottom wall
+        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  cout << coor.transpose() << "   ";
         Xkaux << XG_mid[K](0), 2*coor[1]-XG_mid[K](1), 0.0;
-
+        eJK = XG_mid[K]-Xkaux;
+        dJK = eJK.norm();
+        ep  = dJK-(2*RV[K]);
+        if (ep <= zet){
+          R = RV[K];
+          //ep = zet;
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*2*(z_coefs_mid.head(dim)).norm();
+          Fpw.head(3) += gap * eJK/dJK; //(-z_coefs_mid.head(dim)/z_coefs_mid.head(dim).norm())
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep));//*(z_coefs_mid.head(dim)).norm();
+          for (int L = 0; L < N_Solids; L++){
+            deltaLK = L==K;
+            for (int C = 0; C < dim; C++){
+              for (int D = 0; D < dim; D++){
+                for (int i = 0; i < dim; i++){
+                  deltaDi = D==i;
+                  dFpw(C,D) -= 2*utheta*gap*deltaDi*(deltaLK)/(z_coefs_mid).norm() * eJK(C)/dJK; //-z_coefs_mid(C)/z_coefs_mid.head(dim).norm()
+                }
+              }
+            }
+            for (int C = 0; C < LZ; C++){
+              mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*L + C;
+            }
+            MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
+          }
+          cout << "bottom  ";
+        }
+        zet = 0.01;
+        // left wall
+        Xkaux << 2*coor[0]-XG_mid[K](0), XG_mid[K](1), 0.0;
         eJK = XG_mid[K]-Xkaux;
         dJK = eJK.norm();
         ep  = dJK-(2*RV[K]);
@@ -1777,7 +1807,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           R = RV[K];
           //ep = zet;
           gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*2*(z_coefs_mid).norm();
-          Fpw = gap*eJK/dJK;
+          Fpw.head(3) += gap*eJK/dJK;
           gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep));//*(z_coefs_mid).norm();
           for (int L = 0; L < N_Solids; L++){
             deltaLK = L==K;
@@ -1794,6 +1824,65 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
             }
             MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
           }
+          cout << "left  ";
+        }
+        // right wall
+        widp = widp + 2;
+        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << "   ";
+        Xkaux << 2*coor[0]-XG_mid[K](0), XG_mid[K](1), 0.0;
+        eJK = XG_mid[K]-Xkaux;
+        dJK = eJK.norm();
+        ep  = dJK-(2*RV[K]);
+        if (ep <= zet){
+          R = RV[K];
+          //ep = zet;
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*2*(z_coefs_mid).norm();
+          Fpw.head(3) += gap*eJK/dJK;
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep));//*(z_coefs_mid).norm();
+          for (int L = 0; L < N_Solids; L++){
+            deltaLK = L==K;
+            for (int C = 0; C < dim; C++){
+              for (int D = 0; D < dim; D++){
+                for (int i = 0; i < dim; i++){
+                  deltaDi = D==i;
+                  dFpw(C,D) -= 2*utheta*gap*deltaDi*(deltaLK)/(z_coefs_mid).norm() * eJK(C)/dJK;
+                }
+              }
+            }
+            for (int C = 0; C < LZ; C++){
+              mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*L + C;
+            }
+            MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
+          }
+          cout << "right  ";
+        }
+        //top wall
+        Xkaux << XG_mid[K](0), 2*coor[1]-XG_mid[K](1), 0.0;
+        eJK = XG_mid[K]-Xkaux;
+        dJK = eJK.norm();
+        ep  = dJK-(2*RV[K]);
+        if (ep <= zet){
+          R = RV[K];
+          //ep = zet;
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep))*2*(z_coefs_mid).norm();
+          Fpw.head(3) += gap*eJK/dJK;
+          gap = 8.0*visc*sqrt(R*R*R/(ep*ep*ep));//*(z_coefs_mid).norm();
+          for (int L = 0; L < N_Solids; L++){
+            deltaLK = L==K;
+            for (int C = 0; C < dim; C++){
+              for (int D = 0; D < dim; D++){
+                for (int i = 0; i < dim; i++){
+                  deltaDi = D==i;
+                  dFpw(C,D) -= 2*utheta*gap*deltaDi*(deltaLK)/(z_coefs_mid).norm() * eJK(C)/dJK;
+                }
+              }
+            }
+            for (int C = 0; C < LZ; C++){
+              mapZ_J(C) = n_unknowns_u + n_unknowns_p + LZ*L + C;
+            }
+            MatSetValues(*JJ, mapZ_s.size(), mapZ_s.data(), mapZ_J.size(), mapZ_J.data(), dFpp.data(), ADD_VALUES);
+          }
+          cout << "top  ";
         }
 
         if ((Fpp.norm() != 0) || (Fpw.norm() != 0)){
