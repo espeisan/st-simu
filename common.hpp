@@ -126,8 +126,8 @@ Vector force_rgc(Vector const& Xi, Vector const& Xj, double const Ri, double con
                  double ep, double zeta);
 TensorZ MI_tensor(double M, double R, int dim, Tensor3 TI);
 Tensor RotM(double theta, int dim);
-Vector SlipVel(Vector const& X, Vector const& XG, int dim, int tag);
-Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag);
+//Vector SlipVel(Vector const& X, Vector const& XG, int dim, int tag);
+Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag, double theta);
 
 inline double sqr(double v) {return v*v;}
 
@@ -454,6 +454,7 @@ public:
   PetscErrorCode plotFiles();
   Vector vectorSolidMesh(int const K, Point const* point, int const vs);
   void getFromBSV();
+  Vector u_exacta(Vector const& X, double t, int tag);
   //void printContactAngle(bool _print);
 
   void computeError(Vec const& Vec_x, Vec &Vec_up_1, double tt);
@@ -524,7 +525,7 @@ public:
   int         quadr_degree_err;
   bool        pres_pres_block;
   float       grow_factor;
-  string      filename, filemass;
+  string      filename, filemass, filexas;
   string      filename_out, filehist_out;
 
   std::vector<int> dirichlet_tags;   // vetor com os tags que indicam contorno dirichlet
@@ -648,8 +649,9 @@ public:
   std::vector<double>    MV, RV, VV;  //mass vector, radius vector, area vector
   std::vector<Vector3d>  XG_0, XG_1, XG_aux;
   double                 hme, hmn, hmx;
-  std::vector<double>    theta_0, theta_1, theta_aux;
+  std::vector<double>    theta_0, theta_1, theta_aux, theta_ini;
   std::vector<Tensor3>   InTen;
+  std::vector<double>    RR, UU;
   //bool                   casevar = true, casevarc = true; //case variable or const to H solid vel functional
 
   // mesh alias

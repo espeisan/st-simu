@@ -1108,7 +1108,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         weight = quadr_cell->weight(qp);
         JxW_mid = J_mid*weight;
 
-        if (J_mid < 1.e-14)
+        if (J_mid < 1.e-20)
         {
           FEP_PRAGMA_OMP(critical)
           {
@@ -1540,7 +1540,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     double     ddt_factor, dJK;
     bool       deltaDi, deltaLK, deltaLJ;
     Vector3d   eJK;
-    double     zet = 0.01; //ep = 7.0e-6, epw = ep/10.0;
+    double     zet = 0.07; //ep = 7.0e-6, epw = ep/10.0;
     double gap, ep, R, visc;
 
     if (is_bdf2 && time_step > 0)
@@ -1708,7 +1708,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       }
 #endif
       //Rep force Buscaglia
-#if (true)
+#if (false)
       zet = 0.01;
       for (int J = 0; J < N_Solids; J++){
         if (J != K){
@@ -1767,9 +1767,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       { //This part is sensibly: the 3*N_Solids part depends on the gmsh structure box corner creation
         zet = 0.2;
         Vector   coor(dim);
-        Vector3d Xkaux; int widp = 0;//2*N_Solids; //choose the left-inferior corner as reference
+        Vector3d Xkaux; int widp = 2*N_Solids;//0 2*N_Solids; //choose the left-inferior corner as reference
         // bottom wall
-        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  cout << coor.transpose() << "   ";
+        mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << "   ";
         Xkaux << XG_mid[K](0), 2*coor[1]-XG_mid[K](1), 0.0;
         eJK = XG_mid[K]-Xkaux;
         dJK = eJK.norm();

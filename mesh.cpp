@@ -1402,7 +1402,7 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
       }  //if for RK4  //end if force_mesh_velocity
       else
       {
-        if (  false &&  (  is_in(tag, neumann_tags) || is_in(tag, dirichlet_tags) || is_in(tag, periodic_tags)   )   )
+        if ( false && (  is_in(tag, neumann_tags) || is_in(tag, dirichlet_tags) || is_in(tag, periodic_tags)   )   )
         {
           tmp.setZero();
           VecSetValues(Vec_v_mid, dim, node_dofs_mesh.data(), tmp.data(), INSERT_VALUES);
@@ -2716,12 +2716,12 @@ PetscErrorCode AppCtx::meshAdapt_s()
       ierr = VecCreate(PETSC_COMM_WORLD, petsc_vecs[v]);                              CHKERRQ(ierr);
       ierr = VecSetSizes(*petsc_vecs[v], PETSC_DECIDE, n_unks_t[v]);                  CHKERRQ(ierr);  //dof_handler[DH_t[v]].numDofs()
       ierr = VecSetFromOptions(*petsc_vecs[v]);                                       CHKERRQ(ierr);
-      if (v == 0 || v == 1 || v == 5 || v == 7){//DH_UNKM
+      if (v == 0 || v == 1 || v == 4 || v == 6){//DH_UNKM
         ierr = VecSetOption(*petsc_vecs[v],VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
       }
 
       std::vector<bool>   SV(N_Solids,false);  //solid visited history
-      int tagP, nod_id, dofs_fs_0, dofs_fs_1;
+      int tagP, nod_id, dofs_fs_0, dofs_fs_1, nod_vs, nodsum;
 
       int dofs_0[64]; // old
       int dofs_1[64]; // new
@@ -2744,17 +2744,18 @@ PetscErrorCode AppCtx::meshAdapt_s()
           if (v == 0 || v == 1 || v == 4 || v == 6){
             tagP = point->getTag();
             nod_id = is_in_id(tagP,flusoli_tags);
-
-            if (nod_id){
-              if (!SV[nod_id-1]){
+            nod_vs = is_in_id(tagP,slipvel_tags);
+            nodsum = nod_id+nod_vs;
+            if (nodsum){
+              if (!SV[nodsum-1]){
                 for (int l = 0; l < LZ; l++){
                   dofs_fs_0 = dof_handler_tmp[DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
-                              dof_handler_tmp[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id-1) + l;
+                              dof_handler_tmp[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nodsum-1) + l;
                   dofs_fs_1 = dof_handler    [DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
-                              dof_handler    [DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id-1) + l;
+                              dof_handler    [DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nodsum-1) + l;
                   array[dofs_fs_1] = temp.at(dofs_fs_0);
                 }
-                SV[nod_id-1] = true;
+                SV[nodsum-1] = true;
               }
             }
           }
@@ -2762,8 +2763,8 @@ PetscErrorCode AppCtx::meshAdapt_s()
       }//end for point
       // interpolate values at new points
 
-      if (v == 7 || v == 8 || v == 9 || v == 10)
-        continue;
+      //if (v == 7 || v == 8 || v == 9 || v == 10)
+      //  continue;
 
       std::list<EdgeVtcs>::iterator it     = adde_vtcs.begin();
       std::list<EdgeVtcs>::iterator it_end = adde_vtcs.end();
@@ -2794,14 +2795,16 @@ PetscErrorCode AppCtx::meshAdapt_s()
           if ((v == 0 || v == 1 || v == 4 || v == 6) && (k == VAR_U)){
             tagP = point->getTag();
             nod_id = is_in_id(tagP,flusoli_tags);
-            if (nod_id){
+            nod_vs = is_in_id(tagP,slipvel_tags);
+            nodsum = nod_id+nod_vs;
+            if (nodsum){
               for (int l = 0; l < LZ; l++){
                 dofs_fs_1 = dof_handler[DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
-                            dof_handler[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nod_id-1) + l;
+                            dof_handler[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nodsum-1) + l;
                 Zf(l) = array[dofs_fs_1];
               }
               point->getCoord(X.data(),dim);
-              Uf = SolidVel(X, XG_1[nod_id-1], Zf, dim);
+              Uf = SolidVel(X, XG_1[nodsum-1], Zf, dim);
               for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
                 array[dofs_1[j]] = Uf(j);
             }

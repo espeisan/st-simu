@@ -203,7 +203,7 @@ void AppCtx::setUpDefaultOptions()
   L_range = 0.02;
   L_low = 0.1;//1.0*L_min/L_max;
   L_sup = 1.3; //1.0/L_low;
-  TOLad = 0.7;
+  TOLad = 0.6;
 
   n_unknowns_z = 0; n_unknowns_f = 0; n_unknowns_s = 0;
   n_nodes_fsi  = 0; n_nodes_fo   = 0; n_nodes_so   = 0;
@@ -212,8 +212,8 @@ void AppCtx::setUpDefaultOptions()
 
 bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
 {
-  PetscBool          flg_fin, flg_fout, flg_min, flg_hout;
-  char               finaux[PETSC_MAX_PATH_LEN], minaux[PETSC_MAX_PATH_LEN];
+  PetscBool          flg_fin, flg_fout, flg_min, flg_hout, flg_sin;
+  char               finaux[PETSC_MAX_PATH_LEN], minaux[PETSC_MAX_PATH_LEN], sinaux[PETSC_MAX_PATH_LEN];
   char               foutaux[PETSC_MAX_PATH_LEN], houtaux[PETSC_MAX_PATH_LEN];
   PetscBool          ask_help;
 
@@ -264,6 +264,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsGetString(PETSC_NULL,"-fout",foutaux,PETSC_MAX_PATH_LEN-1,&flg_fout);
   PetscOptionsGetString(PETSC_NULL,"-min",minaux,PETSC_MAX_PATH_LEN-1,&flg_min);
   PetscOptionsGetString(PETSC_NULL,"-hout",houtaux,PETSC_MAX_PATH_LEN-1,&flg_hout);
+  PetscOptionsGetString(PETSC_NULL,"-sin",sinaux,PETSC_MAX_PATH_LEN-1,&flg_sin);
   PetscOptionsHasName(PETSC_NULL,"-help",&ask_help);
 
   is_mr_ab           = PETSC_FALSE;
@@ -493,15 +494,30 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
       Xg << xg, yg, zg;
       MV.push_back(mass); RV.push_back(rad); VV.push_back(vol);
       XG_1.push_back(Xg); XG_0.push_back(Xg); XG_aux.push_back(Xg);
-      theta_1.push_back(0.0); theta_0.push_back(0.0); theta_aux.push_back(0.0);
+      theta_1.push_back(0.0); theta_0.push_back(0.0); theta_aux.push_back(0.0); theta_ini.push_back(rand()%6);
     }
     is.close();
     MV.resize(N_Solids); RV.resize(N_Solids); VV.resize(N_Solids);
     XG_1.resize(N_Solids); XG_0.resize(N_Solids); XG_aux.resize(N_Solids);
-    theta_1.resize(N_Solids); theta_0.resize(N_Solids); theta_aux.resize(N_Solids);
+    theta_1.resize(N_Solids); theta_0.resize(N_Solids); theta_aux.resize(N_Solids); theta_ini.resize(N_Solids);
     //cout << MV[0] << " " << MV[1] << " " << MV[2] << " " << MV[3] <<  endl;
     //cout << RV[0] << " " << RV[1] << " " << RV[2] << " " << RV[3] <<  endl;
     //cout << VV[0] << " " << VV[1] << " " << VV[2] << " " << VV[3] <<  endl;
+  }
+
+  if (flg_sin){
+    filexas.assign(sinaux);
+    int N = 702;
+    double rad = 0.0, uu = 0.0;
+    ifstream is;
+    is.open(filexas.c_str(),ifstream::in);
+    if (!is.good()) {cout << "exact sol file not found" << endl; throw;}
+    for (; N > 0; N--){
+      is >> rad; is >> uu; //cout << rad << "   " << uu << endl;
+      RR.push_back(rad); UU.push_back(uu);
+    }
+    is.close();
+    RR.resize(N); UU.resize(N);
   }
 
   if (flg_hout){
@@ -730,16 +746,16 @@ bool isPeriodic(Point const* p1, Point const* p2, int dim)
 void AppCtx::dofsUpdate()
 {
   dof_handler[DH_UNKM].SetUp();
-  //if (renumber_dofs)
-  //  dof_handler[DH_UNKS].CuthillMcKeeRenumber();
+  if (renumber_dofs)
+    dof_handler[DH_UNKM].CuthillMcKeeRenumber();
   n_nodes_fsi = 0; n_nodes_fo = 0; n_nodes_so = 0;
   std::vector<int> dofs1;
   std::vector<int> dofs2;
   NN_Solids.assign(N_Solids,0);
   int tag, nod_id;
 
-//  int dofs_a[10];
-//  int dofs_b[10];
+  int dofs_a[10];
+  int dofs_b[10];
 
   // apply periodic boundary conditions here
   {
@@ -781,15 +797,15 @@ void AppCtx::dofsUpdate()
             {
               for (int var = 0; var < 2; ++var)
               {
-//                int ndpv = dof_handler[DH_UNKS].getVariable(var).numDofsPerVertex();
+                int ndpv = dof_handler[DH_UNKM].getVariable(var).numDofsPerVertex();
 
-//                dof_handler[DH_UNKS].getVariable(var).getVertexDofs(dofs_a, &*point1);
-//                dof_handler[DH_UNKS].getVariable(var).getVertexDofs(dofs_b, &*point2);
-//                for (int k = 0; k < ndpv; ++k)
-//                {
-//                  dofs1.push_back(dofs_a[k]);
-//                  dofs2.push_back(dofs_b[k]);
-//                }
+                dof_handler[DH_UNKM].getVariable(var).getVertexDofs(dofs_a, &*point1);
+                dof_handler[DH_UNKM].getVariable(var).getVertexDofs(dofs_b, &*point2);
+                for (int k = 0; k < ndpv; ++k)
+                {
+                  dofs1.push_back(dofs_a[k]);
+                  dofs2.push_back(dofs_b[k]);
+                }
               }
 
             }
@@ -1428,7 +1444,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   VectorXi  dofs_fs(LZ);
   Vector3d  Xg, XG_temp, Us;
   int       nod_id, nod_is, tag, nod_vs, nodsum;
-  int       PI = 10; //Picard Iterations
+  int       PI = 2; //Picard Iterations
 
   VecZeroEntries(Vec_v_mid);  //this size(V) = size(X) = size(U)
   VecZeroEntries(Vec_v_1);
@@ -1541,7 +1557,7 @@ PetscErrorCode AppCtx::setInitialConditions()
       if (nod_vs){
         getNodeDofs(&*point, DH_MESH, VAR_M, dofs_mesh.data());
         VecGetValues(Vec_normal, dim, dofs_mesh.data(), Nr.data());
-        Vs = SlipVel(X, XG_0[nod_vs-1], Nr, dim, tag);
+        Vs = SlipVel(X, XG_0[nod_vs-1], Nr, dim, tag, theta_ini[nod_vs-1]);
         VecSetValues(Vec_slipv_0, dim, dofs_mesh.data(), Vs.data(), INSERT_VALUES);
         //Uf = Uf + Vs;  //cout << tag << "  " << X(0)-3 << " " << X(1)-3<< "  " << Uf.transpose() << endl;
       }
@@ -1556,7 +1572,7 @@ PetscErrorCode AppCtx::setInitialConditions()
         Xg(0) = Xg(0)+dt*Zf(0); Xg(1) = Xg(1)+dt*Zf(1); if (dim == 3){Xg(2) = Xg(2)+dt*Zf(2);}
         XG_1[nodsum-1] = Xg;
         theta_1[nodsum-1] = theta_0[nodsum-1] + dt*Zf(2);
-        SV[nodsum-1] = true;
+        SV[nodsum-1] = true;  //cout << XG_1[nodsum-1].transpose() <<  "   " << theta_1[nodsum-1] << endl;
       }
     }
     else{
@@ -1566,6 +1582,11 @@ PetscErrorCode AppCtx::setInitialConditions()
     }
 
   } // end point loop
+
+//  if (is_basic){
+    //if (N_Solids){moveCenterMass(0.0);}
+//    PetscFunctionReturn(0);
+//  }
 
   //Assembly(Vec_uzp_0);  View(Vec_uzp_0,"matrizes/vuzp0.m","vuzp0m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
   //Assembly(Vec_uzp_1);  View(Vec_uzp_1,"matrizes/vuzp1.m","vuzp1m");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
@@ -1627,9 +1648,9 @@ PetscErrorCode AppCtx::setInitialConditions()
             continue;
           }
 
-          if (N_Solids) moveCenterMass(0.5);
+          if (N_Solids) moveCenterMass(1.5);
           //calcMeshVelocity(Vec_x_0, Vec_up_0, Vec_up_1, 1.0, Vec_v_mid, 0.0); // Euler (tem que ser esse no começo)
-          calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 0.5, Vec_v_mid, 0.0); // Adams-Bashforth
+          calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.5, Vec_v_mid, 0.0); // Adams-Bashforth if vtheta = 1.5
           // move the mesh
           VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = Vec_v_mid*dt + Vec_x_0
           if (N_Solids && false){
@@ -1869,28 +1890,28 @@ PetscErrorCode AppCtx::solveTimeProblem()
   getSolidVolume();
   getSolidCentroid();
   getSolidInertiaTensor();
-
+  cout << endl;
   for (int K = 0; K < N_Solids; K++){
-    cout << VV[K] <<  endl;
+    cout << VV[K] <<  ",   " << XG_0[K].transpose() << endl;
     cout << InTen[K] << endl;
-    cout << XG_0[K].transpose() << endl;
   }
+  cout << endl;
 
   // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   // Solve nonlinear system
   //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-  printf("initial volume: %.15lf \n", initial_volume);
+  printf("Initial volume: %.15lf \n\n", initial_volume);
   current_time = 0;
   time_step = 0;
+
+  printf("Num. of time iterations (maxts): %d\n",maxts);
+  printf("Starting time loop ... \n\n");
 
   double Qmax = 0;
   double steady_error = 1;
   setInitialConditions();  //called only here
   int its;
-
-  printf("\nNum. of time iterations (maxts): %d\n",maxts);
-  printf("Starting time loop ... \n");
 
   if (is_bdf2)
   {
@@ -2040,6 +2061,10 @@ PetscErrorCode AppCtx::solveTimeProblem()
           filv << endl;
           filg.close();  //TT++;
           filv.close();
+        }
+        if (false && !unsteady && time_step > 0){
+          plotFiles();
+          break;
         }
       }
       //char buf1[18], buf2[10];
@@ -2562,13 +2587,15 @@ void AppCtx::computeError(Vec const& Vec_x, Vec &Vec_up, double tt)
       weight = quadr_err->weight(qp);
 
       JxW = J*weight;
-
+      //cout << u_exacta(Xqp, tt, tag) << "   " << Uqp << endl;
       //  note: norm(u, H1)^2 = norm(u, L2)^2 + norm(gradLphi_c, L2)^2
-      u_L2_norm        += (u_exact(Xqp, tt, tag) - Uqp).squaredNorm()*JxW;
+      //u_L2_norm        += (u_exact(Xqp, tt, tag) - Uqp).squaredNorm()*JxW;      //cambiar a u_exact
+      u_L2_norm        += (u_exacta(Xqp, tt, tag) - Uqp).squaredNorm()*JxW;      //cambiar a u_exact
       p_L2_norm        += sqr(p_exact(Xqp, tt, tag) - Pqp)*JxW;
       grad_u_L2_norm   += (grad_u_exact(Xqp, tt, tag) - dxU).squaredNorm()*JxW;
       grad_p_L2_norm   += (grad_p_exact(Xqp, tt, tag) - dxP).squaredNorm()*JxW;
-      u_inf_norm       = max(u_inf_norm, (u_exact(Xqp, tt, tag) - Uqp).norm());
+      //u_inf_norm       = max(u_inf_norm, (u_exact(Xqp, tt, tag) - Uqp).norm()); //cambiar a u_exact
+      u_inf_norm       = max(u_inf_norm, (u_exacta(Xqp, tt, tag) - Uqp).norm()); //cambiar a u_exact
       p_inf_norm       = max(p_inf_norm, fabs(p_exact(Xqp, tt, tag) - Pqp));
 
       volume += JxW;
@@ -2691,8 +2718,10 @@ void AppCtx::computeError(Vec const& Vec_x, Vec &Vec_up, double tt)
     cout << endl;
     //cout << "errors computed at last time step: "<< endl;
     //cout << "# hmean               u_L2_norm         p_L2_norm         grad_u_L2_norm    grad_p_L2_norm   u_L2_facet_norm    u_inf_facet_norm" << endl;
-    printf("%-21s %-21s %-21s %-21s %-21s %-21s %s\n", "# hmean", "u_L2_norm", "p_L2_norm", "grad_u_L2_norm", "grad_p_L2_norm", "u_L2_facet_norm", "u_inf_facet_norm" );
-    printf("%.15e %.15e %.15e %.15e %.15e %.15e %.15e\n\n", hmean, u_L2_norm, p_L2_norm, grad_u_L2_norm, grad_p_L2_norm, u_L2_facet_norm, u_inf_facet_norm);
+    //printf("%-21s %-21s %-21s %-21s %-21s %-21s %s\n", "# hmean", "u_L2_norm", "p_L2_norm", "grad_u_L2_norm", "grad_p_L2_norm", "u_L2_facet_norm", "u_inf_facet_norm" );
+    //printf("%.15e %.15e %.15e %.15e %.15e %.15e %.15e\n\n", hmean, u_L2_norm, p_L2_norm, grad_u_L2_norm, grad_p_L2_norm, u_L2_facet_norm, u_inf_facet_norm);
+    printf("%-21s %-21s %-21s \n", "# hmean", "u_L2_norm", "u_inf_facet_norm" );
+    printf("%.15e %.15e %.15e \n\n", hmean, u_L2_norm, u_inf_norm);
   }
 
   Stats.add_p_L2_norm        (p_L2_norm       );
@@ -3452,7 +3481,7 @@ void AppCtx::getFromBSV() //Body Slip Velocity
       Nr      = cross(F_f.col(0), F_f.col(1));
       Nr.normalize();  //cout << Nr.transpose() << endl;
 
-      Vs = SlipVel(Xqp, XG_0[is_slipvel-1], Nr, dim, tag);
+      Vs = SlipVel(Xqp, XG_0[is_slipvel-1], Nr, dim, tag, theta_ini[is_slipvel-1]);
       //cout << Vs.dot(Nr) << "   " << Vs.dot(Xqp) << "   " << Xqp.transpose() << "   " << Xqp.norm() << endl;
       //Vs << 1, 0, 0;
 
@@ -3463,6 +3492,35 @@ void AppCtx::getFromBSV() //Body Slip Velocity
   }
   Vsol = -(1.0/(4.0*Pi))*Vsol;
   Wsol = -(3.0/(8.0*Pi))*Wsol;
+}
+
+Vector AppCtx::u_exacta(Vector const& X, double t, int tag)
+{
+  double x = X(0);
+  double y = X(1);
+  Vector v(Vector::Zero(X.size()));
+  double r  = sqrt(x*x+y*y);
+  double uth = 0.0, uthn = 0.0;
+  int id = 0;
+  double w2 = 2.0;
+  if ( t == 0 ){
+    if (tag == 1){
+      v(0) = -w2*y;
+      v(1) =  w2*x;
+    }
+  }
+  if (t > 0){
+    for (int i = 0; i < 702; i++){
+      if (r <= RR[i]) break;
+      id++;
+    }
+    uth = UU[id]; //if (id < 301) {uthn = UU[id+1];}
+    //cout << tag << "  " << x << "  " << y << "  " << r << "  " << uth << endl;
+    //uth = (uth+uthn)/2;
+    v(0) = uth*(-y/r);
+    v(1) = uth*(x/r);
+  }
+  return v;
 }
 
 void AppCtx::freePetscObjs()
