@@ -1948,6 +1948,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     MatrixXd            Aloc_f(n_dofs_u_per_facet, n_dofs_u_per_facet);
     VectorXd            FUloc(n_dofs_u_per_facet);
 
+    MatrixXd            Prj(n_dofs_u_per_facet,n_dofs_u_per_facet);
+    VectorXi            facet_nodes(nodes_per_facet);
+
     Vector              normal(dim);
     MatrixXd            dxphi_f(n_dofs_u_per_facet/dim, dim);
     Tensor              dxU_f(dim,dim);   // grad u
@@ -2044,6 +2047,19 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         }//end is_surface
 
       }//end Quadrature
+
+      // Projection - to force non-penetrarion bc
+      mesh->getFacetNodesId(&*facet, facet_nodes.data());
+      getProjectorMatrix(Prj, nodes_per_facet, facet_nodes.data(), Vec_x_1, current_time+dt, *this);
+
+      FUloc = Prj*FUloc;
+      Aloc_f = Prj*Aloc_f*Prj;
+
+      //~ FEP_PRAGMA_OMP(critical)
+      {
+        VecSetValues(Vec_fun_fs, mapU_f.size(), mapU_f.data(), FUloc.data(), ADD_VALUES);
+        MatSetValues(*JJ, mapU_f.size(), mapU_f.data(), mapU_f.size(), mapU_f.data(), Aloc_f.data(),  ADD_VALUES);
+      }
     }// end for facet
 
   }
@@ -2177,13 +2193,13 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
     Tensor            invFT_c(dim,dim);
     double            Sqp;
     Vector            s_coefs_c_trans(n_dofs_s_per_cell);  // mesh velocity;
-    MatrixXd          s_coefs_c(nodes_per_cell, dim);
+    Vector            s_coefs_c(n_dofs_s_per_cell);
     MatrixXd          x_coefs_c_trans(dim, nodes_per_cell);
     MatrixXd          x_coefs_c(nodes_per_cell, dim);
     MatrixXd          x_coefs_c_new_trans(dim, nodes_per_cell);
     MatrixXd          x_coefs_c_new(nodes_per_cell, dim);
     MatrixXd          dxpsi_c(n_dofs_s_per_cell, dim);
-    double            J, weight, JxW, MuE, LambE;
+    double            J, weight, JxW;
 
     VectorXd          Floc(n_dofs_s_per_cell);
     MatrixXd          Aloc(n_dofs_s_per_cell, n_dofs_s_per_cell);
@@ -2231,7 +2247,7 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       else
         x_coefs_c = (1.-utheta)*x_coefs_c + utheta*x_coefs_c_new; // for MR-AB, this completes the geom extrap
 
-      s_coefs_c_trans = s_coefs_c.transpose();
+      s_coefs_c_trans = s_coefs_c;
       x_coefs_c_trans = x_coefs_c.transpose();
 
       Floc.setZero();
@@ -2263,70 +2279,6 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
           }
         }
 
-#if(false)
-        for (int i = 0; i < n_dofs_v_per_cell/dim; ++i)  //sobre cantidad de funciones de forma
-        {
-          for (int c = 0; c < dim; ++c)  //sobre dimension
-          {
-            for (int k = 0; k < dim; ++k)  //sobre dimension
-            {
-              sigma_ck = dxV(c,k) + dxV(k,c); //sigma_ck = dxV(c,k);
-
-              if (non_linear)  //is right?
-              {
-                for (int l = 0; l < dim; ++l)
-                {
-                  sigma_ck += dxV(l,c)*dxV(l,k);
-                  if (c==k)
-                  {
-                    sigma_ck -= dxV(l,l);
-                    for (int m = 0; m < dim; ++m)
-                      sigma_ck -=  dxV(l,m)*dxV(l,m);
-                  }
-                }
-              }  //end non_linear
-
-              Floc(i*dim + c) += sigma_ck*dxqsi_c(i,k)*(JxW*MuE) + dxV(k,k)*dxqsi_c(i,c)*(JxW*LambE); // (JxW/JxW) is to compiler not complain about unused variables
-              //Floc(i*dim + c) += sigma_ck*dxqsi_c(i,k)*(JxW*MuE) + dxV(k,k)*dxqsi_c(i,c)*(JxW*(MuE+LambE));
-              for (int j = 0; j < n_dofs_v_per_cell/dim; ++j)
-              {
-                for (int d = 0; d < dim; ++d)
-                {
-                  dsigma_ckjd = 0;
-
-                  if (c==d)
-                    dsigma_ckjd = dxqsi_c(j,k);
-
-                  if (k==d)
-                    dsigma_ckjd += dxqsi_c(j,c);
-
-                  if (non_linear)  //is right?
-                  {
-                    for (int l = 0; l < dim; ++l)
-                    {
-                      if (l==d)
-                        dsigma_ckjd += dxqsi_c(j,c)*dxV(l,k) + dxV(l,c)*dxqsi_c(j,k);  //is ok?
-
-                      if (c==k)
-                      {
-                        if (l==d)
-                        {
-                          dsigma_ckjd -= dxqsi_c(j,l);
-                          for (int m = 0; m < dim; ++m)
-                            dsigma_ckjd -= 2.*dxqsi_c(j,m)*dxV(l,m);
-                        }
-                      }
-                    }
-                  }  //end non_linear
-
-                  Aloc(i*dim + c, j*dim + d) += dsigma_ckjd*dxqsi_c(i,k)*(JxW*MuE) + (1/dim)*dxqsi_c(j,d)*dxqsi_c(i,c)*(JxW*LambE);
-                  //Aloc(i*dim + c, j*dim + d) += dsigma_ckjd*dxqsi_c(i,k)*(JxW*MuE) + (1/dim)*dxqsi_c(j,d)*dxqsi_c(i,c)*(JxW*(LambE+MuE));
-                } // end d
-              } // end j
-            } // end k
-          }// end c
-        } // end i
-#endif
       } // fim quadratura
 
       // Projection - to force non-penetrarion bc
@@ -2348,7 +2300,93 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
   } // end parallel
   //Assembly(*JJ); View(*JJ, "ElastOpAntes", "JJ");
 
-#if(false)
+  {
+    int                 tag;
+    bool                is_slipvel;
+
+    VectorXi            mapS_f(n_dofs_s_per_facet);
+    VectorXi            mapM_f(dim*nodes_per_facet);
+
+    Vector              s_coefs_f_mid(n_dofs_s_per_facet);  // n+utheta
+    Vector              s_coefs_f_old(n_dofs_s_per_facet);        // n
+    Vector              s_coefs_f_new(n_dofs_s_per_facet);        // n+1
+
+    MatrixXd            x_coefs_f_mid_trans(dim, n_dofs_v_per_facet/dim); // n+utheta
+    MatrixXd            x_coefs_f_old(n_dofs_v_per_facet/dim, dim);       // n
+    MatrixXd            x_coefs_f_old_trans(dim, n_dofs_v_per_facet/dim); // n
+    MatrixXd            x_coefs_f_new(n_dofs_v_per_facet/dim, dim);       // n+1
+    MatrixXd            x_coefs_f_new_trans(dim, n_dofs_v_per_facet/dim); // n+1
+
+    Tensor              F_f_mid(dim,dim-1);       // n+utheta
+    Tensor              invF_f_mid(dim-1,dim);    // n+utheta
+    Tensor              fff_f_mid(dim-1,dim-1);   // n+utheta; fff = first fundamental form
+
+    MatrixXd            Aloc_f(n_dofs_s_per_facet, n_dofs_s_per_facet);
+    VectorXd            Floc_f(n_dofs_s_per_facet);
+
+    MatrixXd            Prj(n_dofs_s_per_facet,n_dofs_s_per_facet);
+    VectorXi            facet_nodes(nodes_per_facet);
+
+    double              J_mid = 0, JxW_mid, weight = 0;
+    double Dif = 1, etab = 1, sig = 1;
+//#if(false)
+    facet_iterator facet = mesh->facetBegin();
+    facet_iterator facet_end = mesh->facetEnd();  // the next if controls the for that follows
+
+    if (neumann_tags.size() != 0 || interface_tags.size() != 0 || solid_tags.size() != 0)
+    for (; facet != facet_end; ++facet)
+    {
+      tag = facet->getTag();
+      is_slipvel = is_in(tag, slipvel_tags);
+
+      if (!is_slipvel)
+        continue;
+
+      dof_handler[DH_SLIP].getVariable(VAR_S).getFacetDofs(mapS_f.data(), &*facet);  //cout << mapM_f << endl;
+
+      VecGetValues(Vec_x_0,     mapM_f.size(), mapM_f.data(), x_coefs_f_old.data());
+      VecGetValues(Vec_x_1,     mapM_f.size(), mapM_f.data(), x_coefs_f_new.data());
+      VecGetValues(Vec_v,       mapS_f.size(), mapS_f.data(), s_coefs_f_new.data());
+
+      s_coefs_f_mid = s_coefs_f_new;
+      x_coefs_f_mid_trans = utheta*x_coefs_f_new_trans + (1.-utheta)*x_coefs_f_old_trans;
+
+      // Quadrature
+      for (int qp = 0; qp < n_qpts_facet; ++qp)
+      {
+
+        F_f_mid   = x_coefs_f_mid_trans * dLqsi_f[qp];  // (dim x nodes_per_facet) (nodes_per_facet x dim-1)
+
+        fff_f_mid.resize(dim-1,dim-1);
+        fff_f_mid  = F_f_mid.transpose()*F_f_mid;
+        J_mid      = sqrt(fff_f_mid.determinant());
+        invF_f_mid = fff_f_mid.inverse()*F_f_mid.transpose();
+
+        weight  = quadr_facet->weight(qp);
+        JxW_mid = J_mid*weight;
+
+        for (int i = 0; i < n_dofs_s_per_cell; ++i)
+          Floc_f(i) += etab*sig*psi_f[qp](i) * JxW_mid;
+
+
+      }//end for Quadrature
+
+      // Projection - to force non-penetrarion bc
+      mesh->getFacetNodesId(&*facet, facet_nodes.data());
+      getProjectorMatrix(Prj, nodes_per_facet, facet_nodes.data(), Vec_x_1, current_time+dt, *this);
+
+      Floc_f = Prj*Floc_f;
+
+      //~ FEP_PRAGMA_OMP(critical)
+      {
+        VecSetValues(Vec_fun, mapS_f.size(), mapS_f.data(), Floc_f.data(), ADD_VALUES);
+      }
+
+    }//end for facet
+//#endif
+  }
+
+//#if(false)
   // boundary conditions on global Jacobian
     // solid & triple tags .. force normal
   if (force_dirichlet)  //identify the contribution of points in *_tags
@@ -2385,7 +2423,7 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       MatSetValues(*JJ, dim, v_dofs, dim, v_dofs, A.data(), INSERT_VALUES);//ADD_VALUES);
     }
   }
-#endif
+//#endif
 
   Assembly(*JJ); //View(*JJ, "matrizes/jac.m", "Jacm"); //MatView(*JJ,PETSC_VIEWER_STDOUT_WORLD);
   Assembly(Vec_fun);  //View(Vec_fun, "matrizes/rhs.m", "resm");
