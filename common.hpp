@@ -27,12 +27,16 @@ enum VarNumber {
   VAR_Z = 2,  //variable solid
 
   // DH_MESH
-  VAR_M = 0
+  VAR_M = 0,
+
+  // DH_SQRM
+  VAR_S = 0
 };
 
 enum DofHandlerNumber {
   DH_UNKM = 0,
-  DH_MESH = 1
+  DH_MESH = 1,
+  DH_SLIP = 2
 };
 
 enum PairSpace {
@@ -391,7 +395,10 @@ public:
   PetscErrorCode meshAdapt();
   
   PetscErrorCode formJacobian_mesh(SNES /*snes*/,Vec x, Mat *Mat_Jac, Mat* /*prejac*/, MatStructure * /*flag*/);
-  PetscErrorCode formFunction_mesh(SNES /*snes*/, Vec x, Vec f);  
+  PetscErrorCode formFunction_mesh(SNES /*snes*/, Vec x, Vec f);
+
+  PetscErrorCode formJacobian_sqrm(SNES /*snes*/,Vec x, Mat *Mat_Jac, Mat* /*prejac*/, MatStructure * /*flag*/);
+  PetscErrorCode formFunction_sqrm(SNES /*snes*/, Vec x, Vec f);
   
   // form the residue of the cell
   void formCellFunction(cell_iterator &cell,
@@ -493,6 +500,7 @@ public:
   PetscBool   force_dirichlet;
   PetscBool   full_diriclet;
   PetscBool   force_mesh_velocity;
+  PetscBool   is_sslv;
   PetscBool   ale;
   PetscBool   plot_exact_sol;
   PetscBool   family_files;
@@ -540,7 +548,7 @@ public:
   std::vector<int> solidonly_tags;  //solid only
   std::vector<int> slipvel_tags;
 
-  DofHandler                   dof_handler[2];  //or 3
+  DofHandler                   dof_handler[3];  //or 3
   MeshIoMsh                    msh_reader;
   MeshIoVtk                    vtk_printer;
   shared_ptr<Mesh>             mesh;
@@ -630,11 +638,15 @@ public:
   int           n_dofs_v_per_cell;
   int           n_dofs_v_per_facet;
   int           n_dofs_v_per_corner;
+  int           n_dofs_s_per_cell;
+  int           n_dofs_s_per_facet;
+  int           n_dofs_s_per_corner;
   //int           n_dofs_v2_per_facet;
   int           n_unknowns_fs;
   int           n_unknowns_u;
   int           n_unknowns_p;
   int           n_unknowns_z;
+  int           n_unknowns_sv;
   int           n_dofs_z_per_cell;
   int           n_dofs_z_per_facet;
   int           n_dofs_z_per_corner;
@@ -698,8 +710,13 @@ public:
   
   // slip velocity
   Vec                 Vec_slipv_0, Vec_slipv_1, Vec_slipv_m1, Vec_slipv_m2;
-  Vec                 Vec_uzp_0_ns, Vec_uzp_1_ns;
-
+  Vec                 Vec_uzp_0_ns, Vec_uzp_1_ns, Vec_slip_rho;
+  Mat                 Mat_Jac_s;
+  SNES                snes_s;
+  KSP                 ksp_s;
+  PC                  pc_s;
+  Vec                 Vec_res_s;
+  SNESLineSearch      linesearch_s;
 
   // For Luzia's methods
   double h_star, Q_star, beta_l, L_min, L_max, L_range, L_low, L_sup;
@@ -713,6 +730,7 @@ public:
   double sizeField_s(Vector coords);
   PetscErrorCode meshAdapt_s();
   void smoothsMesh_s(Vec &Vec_normal_, Vec &Vec_x_);
+  PetscErrorCode calcSlipVelocity();
 
   Vector3d Vsol, Wsol;
 

@@ -26,6 +26,8 @@ PetscErrorCode FormJacobian_mesh(SNES snes,Vec Vec_up_1,Mat *Mat_Jac, Mat *preja
 PetscErrorCode FormFunction_mesh(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr);
 PetscErrorCode FormJacobian_fs(SNES snes,Vec Vec_up_1,Mat *Mat_Jac, Mat *prejac, MatStructure *flag, void *ptr);
 PetscErrorCode FormFunction_fs(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr);
+PetscErrorCode FormJacobian_sqrm(SNES snes,Vec Vec_up_1,Mat *Mat_Jac, Mat *prejac, MatStructure *flag, void *ptr);
+PetscErrorCode FormFunction_sqrm(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr);
 
 class AppCtx;
 class Statistics;
@@ -154,6 +156,11 @@ void AppCtx::loadDofs()
     n_dofs_z_per_facet  = nodes_per_facet*LZ;  //dof_handler[DH_UNKM].getVariable(VAR_Z).numDofsPerFacet();
     n_dofs_z_per_corner = nodes_per_corner*LZ; //dof_handler[DH_UNKM].getVariable(VAR_Z).numDofsPerCorner();
   }
+  if (is_sslv){
+    n_dofs_s_per_cell   = dof_handler[DH_SLIP].getVariable(VAR_S).numDofsPerCell();
+    n_dofs_s_per_facet  = dof_handler[DH_SLIP].getVariable(VAR_S).numDofsPerFacet();
+    n_dofs_s_per_corner = dof_handler[DH_SLIP].getVariable(VAR_S).numDofsPerCorner();
+  }
 }
 
 void AppCtx::setUpDefaultOptions()
@@ -177,6 +184,7 @@ void AppCtx::setUpDefaultOptions()
   force_dirichlet        = PETSC_TRUE;   // impõe cc ? (para debug)
   full_diriclet          = PETSC_TRUE;
   force_mesh_velocity    = PETSC_FALSE;
+  is_sslv                = PETSC_FALSE;
   solve_the_sys          = true;   // for debug
   plot_exact_sol         = PETSC_FALSE;
   quadr_degree_cell      = (dim==2) ? 3 : 3;   // ordem de quadratura
@@ -247,6 +255,7 @@ bool AppCtx::getCommandLineOptions(int argc, char **/*argv*/)
   PetscOptionsBool("-unsteady", "unsteady problem", "main.cpp", unsteady, &unsteady, PETSC_NULL);
   PetscOptionsBool("-boundary_smoothing", "boundary_smoothing", "main.cpp", boundary_smoothing, &boundary_smoothing, PETSC_NULL);
   PetscOptionsBool("-force_mesh_velocity", "force_mesh_velocity", "main.cpp", force_mesh_velocity, &force_mesh_velocity, PETSC_NULL);
+  PetscOptionsBool("-solve_slip_velocity", "solve_slip_velocity", "main.cpp", is_sslv, &is_sslv, PETSC_NULL);
   PetscOptionsBool("-renumber_dofs", "renumber dofs", "main.cpp", renumber_dofs, &renumber_dofs, PETSC_NULL);
   PetscOptionsBool("-fprint_ca", "print contact angle", "main.cpp", fprint_ca, &fprint_ca, PETSC_NULL);
   PetscOptionsBool("-nonlinear_elasticity", "put a non-linear term in the elasticity problem", "main.cpp", nonlinear_elasticity, &nonlinear_elasticity, PETSC_NULL);
@@ -702,15 +711,20 @@ void AppCtx::dofsCreate()
   dof_handler[DH_UNKM].addVariable("velo_fluid", shape_phi_c.get(), dim);
   dof_handler[DH_UNKM].addVariable("pres_fluid", shape_psi_c.get(), 1);
   dof_handler[DH_UNKM].getVariable(VAR_P).setType(SPLITTED_BY_REGION_CELL,0,0);
+
   if (N_Solids && false){
     int const * fsi_tag = &flusoli_tags[0];
     dof_handler[DH_UNKM].addVariable("velo_solid", shape_phi_c.get(), 3*(dim-1), flusoli_tags.size(), fsi_tag);
-
 //    int const * fo_tag = &fluidonly_tags[0];
 //    int const * so_tag = &solidonly_tags[0];
 //    dof_handler[DH_FOON].setMesh(mesh.get());
 //    dof_handler[DH_FOON].addVariable("vel_ofluid", shape_phi_c.get(), dim, fluidonly_tags.size(), fo_tag);
 //    dof_handler[DH_FOON].addVariable("vel_osolid", shape_phi_c.get(), dim, fluidonly_tags.size(), so_tag);
+  }
+  if (is_sslv){
+    // slip velocity
+    dof_handler[DH_SLIP].setMesh(mesh.get());
+    dof_handler[DH_SLIP].addVariable("mesh_slip",  shape_psi_c.get(), 1);
   }
 
 }
@@ -832,6 +846,10 @@ void AppCtx::dofsUpdate()
   n_unknowns_fs = n_unknowns_u + n_unknowns_p + N_Solids*3*(dim-1); //- dim*n_nodes_fsi;
 
   //for (unsigned int l = 0; l < NN_Solids.size(); l++) cout << NN_Solids[l] << " ";
+  if (is_sslv){
+    dof_handler[DH_SLIP].SetUp();
+    n_unknowns_sv = dof_handler[DH_SLIP].getVariable(VAR_S).numPositiveDofs();
+  }
 }
 
 PetscErrorCode AppCtx::allocPetscObjs()
@@ -993,7 +1011,7 @@ PetscErrorCode AppCtx::allocPetscObjs()
 
   //Mat Mat_Jac_m;
   ierr = MatCreate(PETSC_COMM_WORLD, &Mat_Jac_m);                                        CHKERRQ(ierr);
-  ierr = MatSetType(Mat_Jac_m,MATSEQAIJ);                                                CHKERRQ(ierr);
+  ierr = MatSetType(Mat_Jac_m, MATSEQAIJ);                                                CHKERRQ(ierr);
   ierr = MatSetSizes(Mat_Jac_m, PETSC_DECIDE, PETSC_DECIDE, n_mesh_dofs, n_mesh_dofs);   CHKERRQ(ierr);
   //ierr = MatSetFromOptions(Mat_Jac_m);                                                 CHKERRQ(ierr);
   ierr = MatSeqAIJSetPreallocation(Mat_Jac_m,  0, nnz.data());                           CHKERRQ(ierr);
@@ -1004,7 +1022,6 @@ PetscErrorCode AppCtx::allocPetscObjs()
   ierr = SNESCreate(PETSC_COMM_WORLD, &snes_m);                                          CHKERRQ(ierr);
   ierr = SNESSetFunction(snes_m, Vec_res_m, FormFunction_mesh, this);                    CHKERRQ(ierr);
   ierr = SNESSetJacobian(snes_m, Mat_Jac_m, Mat_Jac_m, FormJacobian_mesh, this);         CHKERRQ(ierr);
-
   SNESGetLineSearch(snes_m,&linesearch);
   SNESLineSearchSetType(linesearch,SNESLINESEARCHBASIC);
 
@@ -1063,6 +1080,59 @@ PetscErrorCode AppCtx::allocPetscObjs()
     ierr = KSPSetOperators(ksp_fs,Mat_Jac_fs,Mat_Jac_fs,SAME_NONZERO_PATTERN);            CHKERRQ(ierr);
 
     ierr = SNESSetFromOptions(snes_fs); CHKERRQ(ierr);
+
+    if (is_sslv){
+    //  ------------------------------------------------------------------
+    //  ----------------------- Swimmer ----------------------------------
+    //  ------------------------------------------------------------------
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slip_rho);               CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_slip_rho, PETSC_DECIDE, n_unknowns_sv);   CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_slip_rho);                          CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slip_rho, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_s);                CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_res_s, PETSC_DECIDE, n_unknowns_sv);    CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_res_s);                           CHKERRQ(ierr);
+
+    nnz.clear();
+    int n_pho_dofs = n_unknowns_sv;
+    {
+      std::vector<SetVector<int> > tabli;
+      dof_handler[DH_SLIP].getSparsityTable(tabli); // TODO: melhorar desempenho, função mt lenta
+
+      nnz.resize(n_pho_dofs, 0);
+
+      //FEP_PRAGMA_OMP(parallel for)
+      for (int i = 0; i < n_pho_dofs; ++i)
+        {nnz[i] = tabli[i].size();}  //cout << nnz[i] << " ";} //cout << endl;
+    }
+
+    ierr = MatCreate(PETSC_COMM_WORLD, &Mat_Jac_s);                                     CHKERRQ(ierr);
+    ierr = MatSetType(Mat_Jac_s, MATSEQAIJ);                                            CHKERRQ(ierr);
+    ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, n_pho_dofs, n_pho_dofs);  CHKERRQ(ierr);
+    //ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, 2*dim*N_Solids, 2*dim*N_Solids);     CHKERRQ(ierr);
+    ierr = MatSeqAIJSetPreallocation(Mat_Jac_s,  0, nnz.data());                        CHKERRQ(ierr);
+    //ierr = MatSetFromOptions(Mat_Jac_s);                                                CHKERRQ(ierr);
+    //ierr = MatSeqAIJSetPreallocation(Mat_Jac_s, PETSC_DEFAULT, NULL);                   CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_NEW_NONZERO_ALLOCATION_ERR,PETSC_FALSE);             CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_SYMMETRIC,PETSC_TRUE);                               CHKERRQ(ierr);
+
+    ierr = SNESCreate(PETSC_COMM_WORLD, &snes_s);                                          CHKERRQ(ierr);
+    ierr = SNESSetFunction(snes_s, Vec_res_s, FormFunction_sqrm, this);                    CHKERRQ(ierr);
+    ierr = SNESSetJacobian(snes_s, Mat_Jac_s, Mat_Jac_s, FormJacobian_sqrm, this);         CHKERRQ(ierr);
+    SNESGetLineSearch(snes_s,&linesearch_s);
+    SNESLineSearchSetType(linesearch_s,SNESLINESEARCHBASIC);
+
+    ierr = SNESGetKSP(snes_s,&ksp_s);                                                   CHKERRQ(ierr);
+    ierr = KSPGetPC(ksp_s,&pc_s);                                                       CHKERRQ(ierr);
+    ierr = KSPSetOperators(ksp_s,Mat_Jac_s,Mat_Jac_s,SAME_NONZERO_PATTERN);             CHKERRQ(ierr);
+    ierr = KSPSetType(ksp_s,KSPPREONLY);                                                CHKERRQ(ierr);
+    ierr = PCSetType(pc_s,PCLU);                                                        CHKERRQ(ierr);
+    ierr = SNESSetType(snes_s, SNESKSPONLY);                                            CHKERRQ(ierr);
+    ierr = SNESSetFromOptions(snes_m);                                                  CHKERRQ(ierr);
+
+    }
 
   printf(" done.\n");
   PetscFunctionReturn(0);
@@ -1465,11 +1535,10 @@ PetscErrorCode AppCtx::setInitialConditions()
     VecZeroEntries(Vec_slipv_0);
     VecZeroEntries(Vec_slipv_1);
     VecZeroEntries(Vec_slipv_m1);
-    if (is_bdf3){
-      VecZeroEntries(Vec_slipv_m2);
-    }
+    if (is_bdf3){VecZeroEntries(Vec_slipv_m2);}
     VecZeroEntries(Vec_uzp_0_ns); //borrar
     VecZeroEntries(Vec_uzp_1_ns); //borrar
+    if (is_sslv){VecZeroEntries(Vec_slip_rho);}
   }
   if (N_Solids && (is_bdf2 || is_bdf3))
     VecZeroEntries(Vec_x_cur);
@@ -1600,6 +1669,9 @@ PetscErrorCode AppCtx::setInitialConditions()
   VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = dt*Vec_v_mid + Vec_x_0 // for zero Dir. cond. solution lin. elast. is Vec_v_mid = 0
   //if (N_Solids) updateSolidMesh();
   //VecView(Vec_v_mid,PETSC_VIEWER_STDOUT_WORLD); //VecView(Vec_x_0,PETSC_VIEWER_STDOUT_WORLD); VecView(Vec_x_1,PETSC_VIEWER_STDOUT_WORLD);
+  if (is_sslv){
+    calcSlipVelocity();
+  }
   //double Ar; Vector Gr = getAreaMassCenterSolid(1,Ar); cout << Gr.transpose() <<"  "<< XG_0[0].transpose() <<"  "<< XG_1[0].transpose() <<"  "<< Ar << endl;
 
   if (is_basic){
@@ -3523,6 +3595,14 @@ Vector AppCtx::u_exacta(Vector const& X, double t, int tag)
   return v;
 }
 
+PetscErrorCode AppCtx::calcSlipVelocity(){
+  PetscErrorCode      ierr(0);
+
+  ierr = SNESSolve(snes_s, PETSC_NULL, Vec_slip_rho);  CHKERRQ(ierr);
+
+  PetscFunctionReturn(0);
+}
+
 void AppCtx::freePetscObjs()
 {
   Destroy(Mat_Jac_fs); //Destroy(Mat_Jac);
@@ -3815,5 +3895,22 @@ PetscErrorCode FormFunction_fs(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr)
 {
   AppCtx *user    = static_cast<AppCtx*>(ptr);
   user->formFunction_fs(snes,Vec_up_1,Vec_fun);
+  PetscFunctionReturn(0);
+}
+/* ------------------------------------------------------------------- */
+#undef __FUNCT__
+#define __FUNCT__ "FormJacobian_sqrm"
+PetscErrorCode FormJacobian_sqrm(SNES snes,Vec Vec_up_1,Mat *Mat_Jac, Mat *prejac, MatStructure *flag, void *ptr)
+{
+  AppCtx *user    = static_cast<AppCtx*>(ptr);
+  user->formJacobian_sqrm(snes,Vec_up_1,Mat_Jac,prejac,flag);
+  PetscFunctionReturn(0);
+}
+#undef __FUNCT__
+#define __FUNCT__ "FormFunction_mesh"
+PetscErrorCode FormFunction_sqrm(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr)
+{
+  AppCtx *user    = static_cast<AppCtx*>(ptr);
+  user->formFunction_sqrm(snes,Vec_up_1,Vec_fun);
   PetscFunctionReturn(0);
 }
