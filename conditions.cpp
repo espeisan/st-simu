@@ -43,6 +43,11 @@ TensorZ MI_tensor(double M, double R, int dim, Tensor3 TI);
 Tensor RotM(double theta, int dim);
 Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag, double theta);
 
+double Dif_coeff(int tag);
+double nuB_coeff(int tag);
+double sig_coeff(int tag);
+double bbG_coeff(int tag);
+
 
 // gota estática 2d/////////////////////////////////////////////////////////////
 #if (false)
@@ -1946,4 +1951,21 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
     }
   }
   return V;
+}
+
+double Dif_coeff(int tag)
+{
+  return 1;
+}
+double nuB_coeff(int tag)
+{
+  return 1;
+}
+double sig_coeff(int tag)
+{
+  return 1;
+}
+double bbG_coeff(int tag)
+{
+  return 1;
 }

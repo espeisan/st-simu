@@ -133,6 +133,11 @@ Tensor RotM(double theta, int dim);
 //Vector SlipVel(Vector const& X, Vector const& XG, int dim, int tag);
 Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim, int tag, double theta);
 
+double Dif_coeff(int tag);
+double nuB_coeff(int tag);
+double sig_coeff(int tag);
+double bbG_coeff(int tag);
+
 inline double sqr(double v) {return v*v;}
 
 void inline inverseAndDet(Tensor const& a, int dim, Tensor& inv, double& det)

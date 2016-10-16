@@ -1089,7 +1089,7 @@ PetscErrorCode AppCtx::allocPetscObjs()
     ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slip_rho);               CHKERRQ(ierr);
     ierr = VecSetSizes(Vec_slip_rho, PETSC_DECIDE, n_unknowns_sv);   CHKERRQ(ierr);
     ierr = VecSetFromOptions(Vec_slip_rho);                          CHKERRQ(ierr);
-    ierr = VecSetOption(Vec_slip_rho, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slip_rho, VEC_IGNORE_NEGATIVE_INDICES, PETSC_TRUE);  CHKERRQ(ierr);
 
     ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_s);                CHKERRQ(ierr);
     ierr = VecSetSizes(Vec_res_s, PETSC_DECIDE, n_unknowns_sv);    CHKERRQ(ierr);
@@ -3599,6 +3599,56 @@ PetscErrorCode AppCtx::calcSlipVelocity(){
   PetscErrorCode      ierr(0);
 
   ierr = SNESSolve(snes_s, PETSC_NULL, Vec_slip_rho);  CHKERRQ(ierr);
+  //View(Vec_slip_rho, "matrizes/rhosol.m", "rs");
+
+  int tag, k;
+  Point const* point(NULL);//, point_i(NULL);
+  const int n_nodes_total = mesh->numNodesTotal();
+  VectorXi points_id = -VectorXi::Ones(20);  //more than 20?
+  Vector Xi(dim), Xj(dim);
+  MatrixXd Xdif(20,dim);
+  VectorXd Ddif(20), S_coefs(2);
+  VectorXi mapS(2);
+
+  for (int j = 0; j < n_nodes_total; j++)
+  {
+    point = mesh->getNodePtr(j);
+    tag = point->getTag();
+    if (!is_in(tag,slipvel_tags))
+      continue;
+
+    mesh->connectedNodes(&*point, points_id.data());
+    //cout << i << " con to " << points_id.transpose() << endl;
+
+    point->getCoord(Xj.data(),dim);
+    mapS(0) = j;
+    k = 0;
+
+    for (int i = 0; i < 20; i++){
+      if (points_id[i] < 0)
+        break;
+
+      //point_i = mesh->getNodePtr(points_id[i]);
+      tag = mesh->getNodePtr(points_id[i])->getTag();
+
+      if (is_in(tag,solidonly_tags))
+        continue;
+
+      mesh->getNodePtr(points_id[i])->getCoord(Xi.data(),dim);
+      Xdif.row(k) = (Xi-Xj).transpose();
+
+      mapS(1) = points_id[i];
+      VecGetValues(Vec_slip_rho, mapS.size(), mapS.data(), S_coefs.data());
+
+      Ddif(k) = S_coefs(1) - S_coefs(0);
+      k++;
+    }
+
+    cout << Xdif.block(0,0,k-1,k-1) << endl << Ddif.block(0,0,k-1,0) << endl;
+
+
+  }
+
 
   PetscFunctionReturn(0);
 }
