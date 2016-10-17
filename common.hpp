@@ -5,6 +5,7 @@
 #include <Fepic/DofHandler>
 #include <Fepic/Shape>
 #include <Eigen/LU>
+#include <Eigen/Dense>
 #include "petscsnes.h"
 #include <iostream>
 #include <tr1/memory>

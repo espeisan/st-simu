@@ -3601,14 +3601,18 @@ PetscErrorCode AppCtx::calcSlipVelocity(){
   ierr = SNESSolve(snes_s, PETSC_NULL, Vec_slip_rho);  CHKERRQ(ierr);
   //View(Vec_slip_rho, "matrizes/rhosol.m", "rs");
 
+
   int tag, k;
   Point const* point(NULL);//, point_i(NULL);
   const int n_nodes_total = mesh->numNodesTotal();
   VectorXi points_id = -VectorXi::Ones(20);  //more than 20?
-  Vector Xi(dim), Xj(dim);
-  MatrixXd Xdif(20,dim);
-  VectorXd Ddif(20), S_coefs(2);
-  VectorXi mapS(2);
+  Vector Xi(dim), Xj(dim), Nr(dim), Vs(dim);
+  Vector Ddif(20), S_coefs(2), bs(dim), Grad(dim), SGrad(dim);
+  MatrixXd Xdif(20,dim), Wdif(20,20), As(dim,dim);
+  VectorXi mapS(2), dofs_mesh(dim);
+  Tensor I(dim,dim), Pr(dim,dim);
+  I.setIdentity();
+
 
   for (int j = 0; j < n_nodes_total; j++)
   {
@@ -3639,14 +3643,30 @@ PetscErrorCode AppCtx::calcSlipVelocity(){
 
       mapS(1) = points_id[i];
       VecGetValues(Vec_slip_rho, mapS.size(), mapS.data(), S_coefs.data());
-
       Ddif(k) = S_coefs(1) - S_coefs(0);
+
+      Wdif(k,k) = 1./(Xi-Xj).norm();
+
       k++;
     }
 
-    cout << Xdif.block(0,0,k-1,k-1) << endl << Ddif.block(0,0,k-1,0) << endl;
+    As = Xdif.block(0,0,k,dim).transpose()*Wdif.block(0,0,k,k)*Wdif.block(0,0,k,k)*Xdif.block(0,0,k,dim);
+    bs = Xdif.block(0,0,k,dim).transpose()*Wdif.block(0,0,k,k)*Wdif.block(0,0,k,k)*Ddif.head(k);
+    Grad = As.colPivHouseholderQr().solve(bs);
 
+    //As = Wdif.block(0,0,k,k)*Wdif.block(0,0,k,k)*Xdif.block(0,0,k,2);
+    //bs = Wdif.block(0,0,k,k)*Wdif.block(0,0,k,k)*Ddif.head(k)
+    //Grad = As.jacobiSvd(ComputeThinU | ComputeThinV).solve(bs);
+    getNodeDofs(&*point, DH_MESH, VAR_M, dofs_mesh.data());
+    VecGetValues(Vec_normal, dim, dofs_mesh.data(), Nr.data());
 
+    Pr = I - Nr*Nr.transpose();
+    SGrad = Pr*Grad;
+    Vs = -bbG_coeff(tag)*SGrad;
+    VecSetValues(Vec_slipv_0, dim, dofs_mesh.data(), Vs.data(), INSERT_VALUES);
+
+    //cout << Xdif.jacobiSvd(ComputeThinU | ComputeThinV).solve(Ddif);
+    //cout << Grad << endl << endl;
   }
 
 
