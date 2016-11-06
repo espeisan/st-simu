@@ -15,6 +15,9 @@ extern PetscErrorCode FormFunction_mesh(SNES snes, Vec Vec_up_1, Vec Vec_fun, vo
 extern PetscErrorCode FormJacobian_fs(SNES snes,Vec Vec_up_1,Mat *Mat_Jac, Mat *prejac, MatStructure *flag, void *ptr);
 extern PetscErrorCode FormFunction_fs(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr);
 
+extern PetscErrorCode FormJacobian_sqrm(SNES snes,Vec Vec_up_1,Mat *Mat_Jac, Mat *prejac, MatStructure *flag, void *ptr);
+extern PetscErrorCode FormFunction_sqrm(SNES snes, Vec Vec_up_1, Vec Vec_fun, void *ptr);
+
 void checkConsistencyTri(Mesh *mesh)
 {
   cell_iterator cell = mesh->cellBegin();
@@ -2662,13 +2665,19 @@ PetscErrorCode AppCtx::meshAdapt_s()
   Destroy(Vec_normal);
   Destroy(Vec_v_mid);
   Destroy(Vec_v_1);
+  Destroy(Mat_Jac_s);
+  Destroy(Vec_slip_rho);
   SNESReset(snes_fs);
   SNESReset(snes_m);
+  SNESReset(snes_s);
   KSPReset(ksp_fs);
   KSPReset(ksp_m);
+  KSPReset(ksp_s);
   PCReset(pc_fs);
   PCReset(pc_m);
+  PCReset(pc_s);
   SNESLineSearchReset(linesearch);
+  SNESLineSearchReset(linesearch_s);
 
   DofHandler  dof_handler_tmp[2];
 
@@ -2921,6 +2930,54 @@ PetscErrorCode AppCtx::meshAdapt_s()
     ierr = SNESSetType(snes_m, SNESKSPONLY); CHKERRQ(ierr);
   }
   ierr = SNESSetFromOptions(snes_m); CHKERRQ(ierr);
+
+  if (is_sslv){
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slip_rho);               CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_slip_rho, PETSC_DECIDE, n_unknowns_sv);   CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_slip_rho);                          CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slip_rho, VEC_IGNORE_NEGATIVE_INDICES, PETSC_TRUE);  CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_s);                CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_res_s, PETSC_DECIDE, n_unknowns_sv);    CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_res_s);                           CHKERRQ(ierr);
+
+    nnz.clear();
+    int n_pho_dofs = n_unknowns_sv;
+    {
+      std::vector<SetVector<int> > tabli;
+      dof_handler[DH_SLIP].getSparsityTable(tabli); // TODO: melhorar desempenho, função mt lenta
+
+      nnz.resize(n_pho_dofs, 0);
+
+      //FEP_PRAGMA_OMP(parallel for)
+      for (int i = 0; i < n_pho_dofs; ++i)
+        {nnz[i] = tabli[i].size();}  //cout << nnz[i] << " ";} //cout << endl;
+    }
+
+    ierr = MatCreate(PETSC_COMM_WORLD, &Mat_Jac_s);                                     CHKERRQ(ierr);
+    ierr = MatSetType(Mat_Jac_s, MATSEQAIJ);                                            CHKERRQ(ierr);
+    ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, n_pho_dofs, n_pho_dofs);  CHKERRQ(ierr);
+    //ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, 2*dim*N_Solids, 2*dim*N_Solids);     CHKERRQ(ierr);
+    ierr = MatSeqAIJSetPreallocation(Mat_Jac_s,  0, nnz.data());                        CHKERRQ(ierr);
+    //ierr = MatSetFromOptions(Mat_Jac_s);                                                CHKERRQ(ierr);
+    //ierr = MatSeqAIJSetPreallocation(Mat_Jac_s, PETSC_DEFAULT, NULL);                   CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_NEW_NONZERO_ALLOCATION_ERR,PETSC_FALSE);             CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_SYMMETRIC,PETSC_TRUE);                               CHKERRQ(ierr);
+
+    ierr = SNESCreate(PETSC_COMM_WORLD, &snes_s);                                          CHKERRQ(ierr);
+    ierr = SNESSetFunction(snes_s, Vec_res_s, FormFunction_sqrm, this);                    CHKERRQ(ierr);
+    ierr = SNESSetJacobian(snes_s, Mat_Jac_s, Mat_Jac_s, FormJacobian_sqrm, this);         CHKERRQ(ierr);
+    SNESGetLineSearch(snes_s,&linesearch_s);
+    SNESLineSearchSetType(linesearch_s,SNESLINESEARCHBASIC);
+
+    ierr = SNESGetKSP(snes_s,&ksp_s);                                                   CHKERRQ(ierr);
+    ierr = KSPGetPC(ksp_s,&pc_s);                                                       CHKERRQ(ierr);
+    ierr = KSPSetOperators(ksp_s,Mat_Jac_s,Mat_Jac_s,SAME_NONZERO_PATTERN);             CHKERRQ(ierr);
+    ierr = KSPSetType(ksp_s,KSPPREONLY);                                                CHKERRQ(ierr);
+    ierr = PCSetType(pc_s,PCLU);                                                        CHKERRQ(ierr);
+    ierr = SNESSetType(snes_s, SNESKSPONLY);                                            CHKERRQ(ierr);
+    ierr = SNESSetFromOptions(snes_s);
+  }
 
   // check
   if (false)

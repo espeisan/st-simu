@@ -1739,7 +1739,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       }
 #endif
       //Rep force Buscaglia
-#if (false)
+#if (true)
       zet = 0.01;
       for (int J = 0; J < N_Solids; J++){
         if (J != K){
@@ -1798,7 +1798,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       { //This part is sensibly: the 3*N_Solids part depends on the gmsh structure box corner creation
         zet = 0.2;
         Vector   coor(dim);
-        Vector3d Xkaux; int widp = 2*N_Solids;//0 2*N_Solids; //choose the left-inferior corner as reference
+        Vector3d Xkaux; int widp = 6*N_Solids;//0 2*N_Solids; //choose the left-inferior corner as reference
         // bottom wall
         mesh->getNodePtr(widp)->getCoord(coor.data(),dim);  //cout << coor.transpose() << "   ";
         Xkaux << XG_mid[K](0), 2*coor[1]-XG_mid[K](1), 0.0;
@@ -1950,12 +1950,12 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
   // LOOP NAS FACES DO CONTORNO (Neum, Interf, Sol) //////////////////////////////////////////////////
   //~ FEP_PRAGMA_OMP(parallel default(none) shared(Vec_uzp_k,Vec_fun_fs,cout))
   {
-    int                 tag;
-    bool                is_neumann, is_surface, is_solid;
+    int                 tag, sid;
+    bool                is_neumann, is_surface, is_solid, is_slipvel;
 
     VectorXi            mapU_f(n_dofs_u_per_facet);
     VectorXi            mapP_f(n_dofs_p_per_facet);
-    VectorXi            mapM_f(dim*nodes_per_facet);
+    VectorXi            mapM_f(dim*nodes_per_facet), mapS_f(dim*nodes_per_facet);
 
     MatrixXd            u_coefs_f_mid_trans(dim, n_dofs_u_per_facet/dim);  // n+utheta
     MatrixXd            u_coefs_f_old(n_dofs_u_per_facet/dim, dim);        // n
@@ -1972,12 +1972,16 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     MatrixXd            noi_coefs_f_new(n_dofs_v_per_facet/dim, dim);  // normal interpolada em n+1
     MatrixXd            noi_coefs_f_new_trans(dim, n_dofs_v_per_facet/dim);  // normal interpolada em n+1
 
+    MatrixXd            s_coefs_f_old(n_dofs_s_per_facet, dim);
+    MatrixXd            s_coefs_f_new(n_dofs_s_per_facet, dim);
+    MatrixXd            s_coefs_f_mid_trans(dim, n_dofs_s_per_facet); // n+utheta
+
     Tensor              F_f_mid(dim,dim-1);       // n+utheta
     Tensor              invF_f_mid(dim-1,dim);    // n+utheta
     Tensor              fff_f_mid(dim-1,dim-1);   // n+utheta; fff = first fundamental form
 
     MatrixXd            Aloc_f(n_dofs_u_per_facet, n_dofs_u_per_facet);
-    VectorXd            FUloc(n_dofs_u_per_facet);
+    VectorXd            FUloc(n_dofs_u_per_facet), FSloc(LZ);
 
     MatrixXd            Prj(n_dofs_u_per_facet,n_dofs_u_per_facet);
     VectorXi            facet_nodes(nodes_per_facet);
@@ -1985,24 +1989,25 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     Vector              normal(dim);
     MatrixXd            dxphi_f(n_dofs_u_per_facet/dim, dim);
     Tensor              dxU_f(dim,dim);   // grad u
-    Vector              Xqp(dim);
-    Vector              Uqp(dim);
+    Vector              Xqp(dim), Xqpc(3), maxw(3);
+    Vector              Uqp(dim), Eqp(dim);
     Vector              noi(dim); // normal interpolada
     double              J_mid = 0,JxW_mid;
-    double              weight = 0;
+    double              weight = 0, perE = 0;
 
     facet_iterator facet = mesh->facetBegin();
     facet_iterator facet_end = mesh->facetEnd();  // the next if controls the for that follows
 
-    if (neumann_tags.size() != 0 || interface_tags.size() != 0 || solid_tags.size() != 0)
+    if (neumann_tags.size() != 0 || interface_tags.size() != 0 || solid_tags.size() != 0 || slipvel_tags.size() != 0)
     for (; facet != facet_end; ++facet)
     {
       tag = facet->getTag();
       is_neumann = is_in(tag, neumann_tags);
       is_surface = is_in(tag, interface_tags);
       is_solid   = is_in(tag, solid_tags);
+      is_slipvel = is_in(tag, slipvel_tags);
 
-      if ((!is_neumann) && (!is_surface) && (!is_solid))
+      if ((!is_neumann) && (!is_surface) && (!is_solid) && !(is_slipvel))
         continue;
 
       // mapeamento do local para o global:
@@ -2026,6 +2031,15 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
       FUloc.setZero();
       Aloc_f.setZero();
+
+      if (is_sslv && false){
+        dof_handler[DH_SLIP].getVariable(VAR_S).getFacetDofs(mapS_f.data(), &*facet);
+        VecGetValues(Vec_slipv_0, mapS_f.size(), mapS_f.data(), s_coefs_f_old.data());
+        VecGetValues(Vec_slipv_1, mapS_f.size(), mapS_f.data(), s_coefs_f_new.data());
+        s_coefs_f_mid_trans = utheta*s_coefs_f_new.transpose() + (1.-utheta)*s_coefs_f_old.transpose();;
+        FSloc.setZero();
+      }
+
 
       // Quadrature
       for (int qp = 0; qp < n_qpts_facet; ++qp)
@@ -2056,7 +2070,11 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         dxphi_f = dLphi_f[qp] * invF_f_mid;
         dxU_f   = u_coefs_f_mid_trans * dxphi_f; // n+utheta
         Uqp     = u_coefs_f_mid_trans * phi_f[qp];
-        noi     = noi_coefs_f_new_trans * qsi_f[qp];
+        //noi     = noi_coefs_f_new_trans * qsi_f[qp];
+        if (is_sslv && false){
+          Eqp = s_coefs_f_mid_trans * qsi_f[qp];
+          perE = per_Elect(tag);
+        }
 
         if (is_surface)
         {
@@ -2081,6 +2099,26 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
                   Aloc_f(i*dim + c, j*dim + c) += utheta*JxW_mid* (unsteady*dt) *gama(Xqp,current_time,tag)*dxphi_f.row(i).dot(dxphi_f.row(j));
           }//end semi-implicit
         }//end is_surface
+
+
+        if (is_sslv && is_slipvel && false)
+        {
+          sid = is_in_id(tag, slipvel_tags);
+
+          Xqpc.setZero();
+          Xqpc(0) = Xqp(0); Xqpc(1) = Xqp(1); if (dim == 3){Xqpc(2) = Xqp(2);}
+
+          maxw = JxW_mid*traction_maxwell(Eqp, normal, perE, tag);
+          FSloc(0) = maxw(0); FSloc(1) = maxw(1); if (dim == 3){FSloc(2) = maxw(2);}
+
+          maxw = JxW_mid*cross((XG_mid[sid]-Xqpc),traction_maxwell(Eqp, normal, perE, tag));
+          if (dim == 2){
+            FSloc(2) = maxw(2);
+          }
+          else{
+            FSloc.tail(3) = maxw;
+          }
+        }
 
       }//end Quadrature
 
@@ -2208,6 +2246,7 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
   //else if (is_basic)
   //  utheta = 0.0;
 
+  utheta = 1.0;
   // NOTE: solve elasticity problem in the mesh at time step n
   // NOTE: The mesh used is the Vec_x_0
   // WARNING: this function assumes that the boundary conditions was already applied
@@ -2248,8 +2287,6 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
     Point             const* point;
     int               tags, ctags = 0;
 
-    double Dif = 1;
-
     const int tid = omp_get_thread_num();
     const int nthreads = omp_get_num_threads();
 
@@ -2263,7 +2300,7 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
 
       if(is_in(tag,solidonly_tags)){
         ctags = 0;
-        for (int i = 0; i < nodes_per_cell; i++){
+        for (int i = 0; i < n_dofs_s_per_cell; i++){
           point = mesh->getNodePtr(mapS_c(i));
           tags = point->getTag();
           if (is_in(tags,solidonly_tags)){
@@ -2353,7 +2390,7 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
   //MatView(*JJ,PETSC_VIEWER_STDOUT_WORLD);
   {
     int                 tag;
-    bool                is_slipvel;
+    bool                is_slipvel, is_fsi;
 
     VectorXi            mapS_f(n_dofs_s_per_facet);
     VectorXi            mapM_f(dim*nodes_per_facet);
@@ -2379,7 +2416,6 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
     VectorXi            facet_nodes(nodes_per_facet);
 
     double              J_mid = 0, JxW_mid, weight = 0;
-    double etab = 1, sig = 1;
 //#if(false)
     facet_iterator facet = mesh->facetBegin();
     facet_iterator facet_end = mesh->facetEnd();  // the next if controls the for that follows
@@ -2389,8 +2425,9 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
     {
       tag = facet->getTag();
       is_slipvel = is_in(tag, slipvel_tags);
+      is_fsi     = is_in(tag, flusoli_tags);
 
-      if (!is_slipvel)
+      if (!(is_slipvel) && !(is_fsi))
         continue;
 
       dof_handler[DH_SLIP].getVariable(VAR_S).getFacetDofs(mapS_f.data(), &*facet);  //cout << mapM_f << endl;
@@ -2429,10 +2466,10 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
       }//end for Quadrature
 
       // Projection - to force non-penetrarion bc
-      mesh->getFacetNodesId(&*facet, facet_nodes.data());
-      getProjectorSQRM(Prj, nodes_per_facet, facet_nodes.data(), *this);
+      //mesh->getFacetNodesId(&*facet, facet_nodes.data());
+      //getProjectorSQRM(Prj, nodes_per_facet, facet_nodes.data(), *this);
       //cout << Floc_f.transpose() << endl;
-      Floc_f = Prj*Floc_f;
+      //Floc_f = Prj*Floc_f;
 
       //~ FEP_PRAGMA_OMP(critical)
       {
@@ -2448,10 +2485,10 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
     // solid & triple tags .. force normal
   if (force_dirichlet)  //identify the contribution of points in *_tags
   {
-    int      nodeid;
+    //int      nodeid;
     int      v_dofs[1];
     Vector   normal(dim);
-    Tensor   A(1,1);
+    double   A;//Tensor   A(1,1);
     //Tensor   I(Tensor::Identity(1,1));
     int      tag;
 
@@ -2470,19 +2507,20 @@ PetscErrorCode AppCtx::formFunction_sqrm(SNES /*snes_m*/, Vec Vec_v, Vec Vec_fun
             is_in(tag,flusoli_tags)   ||
             is_in(tag,solidonly_tags) ))
         continue;
-      //dof_handler[DH_UNKS].getVariable(VAR_U).getVertexAssociatedDofs(v_dofs, &*point);
-      getNodeDofs(&*point, DH_SLIP, VAR_S, v_dofs);
 
-      nodeid = mesh->getPointId(&*point);
-      getProjectorSQRM(A, 1, &nodeid, *this);
-      A(0,0) = 1 - A(0,0);
-      MatSetValues(*JJ, 1, v_dofs, 1, v_dofs, A.data(), INSERT_VALUES);//ADD_VALUES);
+      getNodeDofs(&*point, DH_SLIP, VAR_S, v_dofs);
+      A = 1.0;
+      if ( is_in(tag,dirichlet_tags) || is_in(tag,solidonly_tags) )
+        A = 0.0;
+
+      A = 1.0 - A;
+      MatSetValues(*JJ, 1, v_dofs, 1, v_dofs, &A, ADD_VALUES);//);INSERT_VALUES
     }
   }
 //#endif
 
-  Assembly(*JJ);  View(*JJ, "matrizes/jac.m", "Jacm"); //MatView(*JJ,PETSC_VIEWER_STDOUT_WORLD);
-  Assembly(Vec_fun);  View(Vec_fun, "matrizes/rhs.m", "resm");
+  Assembly(*JJ);  //View(*JJ, "matrizes/jac.m", "J"); //MatView(*JJ,PETSC_VIEWER_STDOUT_WORLD);
+  Assembly(Vec_fun);  //View(Vec_fun, "matrizes/rhs.m", "R");
   //View(*JJ, "ElastOp", "JJ");
   //double val; VecNorm(Vec_fun,NORM_2,&val); cout << "norma residuo " << val <<endl;
   //cout << "Mesh calculation:" << endl;

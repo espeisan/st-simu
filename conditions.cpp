@@ -48,6 +48,9 @@ double nuB_coeff(int tag);
 double sig_coeff(int tag);
 double bbG_coeff(int tag);
 
+Vector traction_maxwell(Vector const& E, Vector const& normal, double eps, int tag);
+double per_Elect(int tag);
+
 
 // gota estática 2d/////////////////////////////////////////////////////////////
 #if (false)
@@ -1959,7 +1962,10 @@ double Dif_coeff(int tag)
 }
 double nuB_coeff(int tag)
 {
-  return 1;
+  if (tag == 103 || tag == 104)
+    return 1;
+  else
+    return 0;
 }
 double sig_coeff(int tag)
 {
@@ -1968,4 +1974,24 @@ double sig_coeff(int tag)
 double bbG_coeff(int tag)
 {
   return 1;
+}
+double per_Elect(int tag)
+{
+  return 1;
+}
+
+Vector traction_maxwell(Vector const& E, Vector const& normal, double eps, int tag)
+{
+  int d = E.size();
+  Vector T(Vector::Zero(3));
+  Tensor I(Tensor::Identity(3,3));
+  Vector Ec(Vector::Zero(3)), normalc(Vector::Zero(3));
+  if (d == 2){
+    Ec(0) = E(0); Ec(1) = E(1); normalc(0) = normal(0); normalc(1) = normal(1);
+  }
+  else{
+    Ec = E; normalc = normal;
+  }
+  T = eps*(Ec*Ec.transpose() - Ec.norm()*Ec.norm()*I)*normal;
+  return T;
 }

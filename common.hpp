@@ -139,6 +139,9 @@ double nuB_coeff(int tag);
 double sig_coeff(int tag);
 double bbG_coeff(int tag);
 
+Vector traction_maxwell(Vector const& E, Vector const& normal, double eps, int tag);
+double per_Elect(int tag);
+
 inline double sqr(double v) {return v*v;}
 
 void inline inverseAndDet(Tensor const& a, int dim, Tensor& inv, double& det)
@@ -661,6 +664,7 @@ public:
   int           n_nodes_fsi;
   int           n_nodes_fo;
   int           n_nodes_so;
+  int           n_nodes_sv;
   
   int                    N_Solids, LZ;
   std::vector<int>       NN_Solids;
@@ -736,7 +740,7 @@ public:
   double sizeField_s(Vector coords);
   PetscErrorCode meshAdapt_s();
   void smoothsMesh_s(Vec &Vec_normal_, Vec &Vec_x_);
-  PetscErrorCode calcSlipVelocity();
+  PetscErrorCode calcSlipVelocity(Vec& Vec_slipv);
 
   Vector3d Vsol, Wsol;
 
