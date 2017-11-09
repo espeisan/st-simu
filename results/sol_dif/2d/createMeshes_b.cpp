@@ -8,38 +8,43 @@ using namespace std;
 
 int main()
 {
-	double L=1.00;    			// Global scale factor
-	double lc = .1; //= L/1;				// Factor for the mesh refinement solid interface
-	double li = .1; //L/1;
-	double lw = .5; //L/1;
-	double width  = 6; //40*L;		// Tube width
-	double height = 6; //40*L;			// Tube height
+	double L  = 2.00;    			// Global scale factor
+	double lc = .1; //= L/1;		// Factor for the mesh refinement solid interface (solid only region)
+	double li = .1; //L/1;			// Factor for the mesh refinement fsi interface (fsi only region)
+	double ls = .1;				// Factor for the mesh refinement slv interface (slip vel only region)
+	double lw = 1; //L/1;
+	double width  = 16; //40*L;		// Tube width
+	double height = 16; //40*L;			// Tube height
 //	double R = 0.2*L; 			// Radius of the bubbles
-	int    N = 2;				// Number of bubbles in the tube
+	int    N = 1;				// Number of bubbles in the tube
 	double coord[N][2]; 			// Coordenadas centrais das bolhas
 	double *ri = new double[N];   //Raio de cada bolha menor
 	double *rI = new double[N];   //Raio mayor
-	double ri_min = .125, ri_max = .125; // L_min =1.2, L_max = 2;  //
-	double rI_min = .125, rI_max = .200;
+	double ri_min = 0.12, ri_max = 0.12; // L_min =1.2, L_max = 2;  //
+	double rI_min = 1.2, rI_max = 1.2;
     int    FS = 101;                  //physical fsi starting tag
 	double rho = 1.5;
 	double pi = 3.14159265358979323846;
-	double layer = 0.2*width, min, dist, epsil, epsiy, theta;
-	
+	double layerw = .05*width, layerh = 0.2*height, min, dist, epsil, epsiy, theta;
+	int msho = 1;                  //mesh order
+
 	// Arquivo de saida
+	char buffer[50];
+	sprintf(buffer,"%dsol%d.geo",N,msho);
 	fstream fout;
-	fout.open("Nsol1.geo",std::fstream::out);
+	fout.open(buffer,std::fstream::out);
 	
 	// mass radious information file
 	fstream iout;
-	iout.open("Nsol1.txt",std::fstream::out);
+	sprintf(buffer,"%dsol%d.txt",N,msho);
+	iout.open(buffer,std::fstream::out);
 
 	cout << "intervalo da rand: " <<  RAND_MAX << endl;
     srand( (unsigned)time(NULL) );
 	for( int i=0; i<N; i++)
 	{
-		coord[i][0] = (width-2*layer)*rand()/((double)RAND_MAX) + layer;
-		coord[i][1] = (height-2*layer)*rand()/((double)RAND_MAX) + layer;
+		coord[i][0] = width/2;//(width-2*layerw)*rand()/((double)RAND_MAX) + layerw;
+		coord[i][1] = height/2;//(height-2*layerh)*rand()/((double)RAND_MAX) + layerh;
 		
         cout << "Numero :" << i << " " << coord[i][0] << " " << coord[i][1] << endl;
         
@@ -74,6 +79,7 @@ int main()
 	fout << "L = " << L << ";" << endl;    				// Global scale factor
 	fout << "lc = " << lc << ";" << endl;				// Factor for the mesh refinement
 	fout << "li = " << li << ";" << endl;
+	fout << "ls = " << ls << ";" << endl;
 	fout << "lw = " << lw << ";" << endl;
 	fout << "width = " << width << ";"<< endl;			// Tube width
 	fout << "height = " << height << ";"<< endl;			// Tube height
@@ -86,19 +92,19 @@ int main()
 	// Definição da borda dos corpos
 	for( int i=0; i<N ; i++)
 	{
-		fout << "Point(" << N+6*i+1 << ") = {" << coord[i][0]+rI[i] << "," << coord[i][1]       << ",0,lc};" << endl;
-		fout << "Point(" << N+6*i+2 << ") = {" << coord[i][0]       << "," << coord[i][1]+ri[i] << ",0,lc};" << endl;
-		fout << "Point(" << N+6*i+3 << ") = {" << coord[i][0]-rI[i] << "," << coord[i][1]       << ",0,lc};" << endl;
-		fout << "Point(" << N+6*i+4 << ") = {" << coord[i][0]       << "," << coord[i][1]-ri[i] << ",0,lc};" << endl;
-		epsil = 0.8*rI[i];
+		fout << "Point(" << N+6*i+1 << ") = {" << coord[i][0]+rI[i] << "," << coord[i][1]       << ",0,li};" << endl;
+		fout << "Point(" << N+6*i+2 << ") = {" << coord[i][0]       << "," << coord[i][1]+ri[i] << ",0,li};" << endl;
+		fout << "Point(" << N+6*i+3 << ") = {" << coord[i][0]-rI[i] << "," << coord[i][1]       << ",0,ls};" << endl;
+		fout << "Point(" << N+6*i+4 << ") = {" << coord[i][0]       << "," << coord[i][1]-ri[i] << ",0,li};" << endl;
+		epsil = 0.5*rI[i];
 		epsiy = (ri[i]/rI[i])*sqrt(pow(rI[i],2)-pow(epsil,2));
-		fout << "Point(" << N+6*i+5 << ") = {" << coord[i][0]-epsil << "," << coord[i][1]+epsiy << ",0,lc};" << endl;
-		fout << "Point(" << N+6*i+6 << ") = {" << coord[i][0]-epsil << "," << coord[i][1]-epsiy << ",0,lc};" << endl;
+		fout << "Point(" << N+6*i+5 << ") = {" << coord[i][0]-epsil << "," << coord[i][1]+epsiy << ",0,ls};" << endl;
+		fout << "Point(" << N+6*i+6 << ") = {" << coord[i][0]-epsil << "," << coord[i][1]-epsiy << ",0,ls};" << endl;
 		
 		theta = 2*pi*rand()/((double)RAND_MAX);
-		fout << "Rotate {{0,0,1},{" << coord[i][0] << "," << coord[i][1] << ",0}," << theta << "} {\n" 
-		     << "\t Point{" << N+6*i+1 << "," << N+6*i+2 << "," << N+6*i+5 << 
-		                "," << N+6*i+3 << "," << N+6*i+6 << "," << N+6*i+4 << "};" << "\n}";
+//		fout << "Rotate {{0,0,1},{" << coord[i][0] << "," << coord[i][1] << ",0}," << theta << "} {\n" 
+//		     << "\t Point{" << N+6*i+1 << "," << N+6*i+2 << "," << N+6*i+5 << 
+//		                "," << N+6*i+3 << "," << N+6*i+6 << "," << N+6*i+4 << "};" << "\n}" << endl;
 
 		fout << "Ellipse(" << 6*i+1 << ") = {" << N+6*i+1 << "," <<  i+1 <<"," << N+6*i+4 << "," << N+6*i+2 << "};"<< endl;
 		fout << "Ellipse(" << 6*i+2 << ") = {" << N+6*i+2 << "," <<  i+1 <<"," << N+6*i+4 << "," << N+6*i+5 << "};"<< endl;
@@ -112,7 +118,7 @@ int main()
 		                                       << 6*i+4 << "," << 6*i+5 << "," << 6*i+6 << "};" << endl;
         fout << "Physical Line(" << FS+i << ") = {" << 6*i+1 << "," << 6*i+2 << "," 
                                                     << 6*i+5 << "," << 6*i+6 << "};" << endl;  //fsi_tags
-        fout << "Physical Line(" <<FS+i+N<< ") = {" << 6*i+3 << "," << 6*i+4 << "};" << endl;  //fsi_tags                                          
+        fout << "Physical Line(" <<FS+i+N<< ") = {" << 6*i+3 << "," << 6*i+4 << "};" << endl;  //slv_tags, FS+i+N to diferenciate fsi from slv
         //fout << "Physical Point(" << FS+i << ") = {" << N+2*i+1 << "," << N+2*i+2 << "};" << endl; //interfacial points
 		iout << rho*pi*ri[i]*rI[i] << " " << fmax(ri[i],rI[i]) << " " << pi*ri[i]*rI[i] << " " 
 		     << coord[i][0] << " " << coord[i][1] << endl;
@@ -144,7 +150,7 @@ int main()
 	fout << "Physical Line(1) = {6*N+4};" << endl;
 	fout << "Physical Line(2) = {6*N+1};" << endl;
 	fout << "Physical Line(3) = {6*N+2};" << endl;
-	fout << "Physical Line(4) = {6*N+3};" << endl;
+	fout << "Physical Line(4) = {6*N+3};" << endl;  //defines box borders 1-5
 //	fout << "Physical Point(5) = {3*N+4, 3*N+3, 3*N+2, 3*N+1};" << endl;
 //	fout << "Physical Line(physicalTagWall) = {2*N+1:2*N+4};"<< endl;
 
@@ -164,7 +170,10 @@ int main()
 	
 	fout.close();
 	iout.close();
-	cout << lc << endl;
-
+	//cout << lc << endl;
+	cout << "-dir_tags 1-5  " << "-fonly_tags 10  " 
+	     << "-fsi_tags "   << FS     << "-" << FS+N   << "  " 
+	     << "-slipv_tags " << FS+N   << "-" << FS+2*N << "  "   
+	     << "-sonly_tags " << FS+2*N << "-" << FS+3*N << endl;
 	return 0;
 }

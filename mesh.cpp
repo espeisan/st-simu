@@ -153,7 +153,7 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
   VectorXi          facet_nodes(nodes_per_facet);
   MatrixXd          x_coefs(nodes_per_facet, dim);                // coordenadas nodais da célula
   MatrixXd          x_coefs_trans(dim, nodes_per_facet);
-  Vector            X(dim);
+  Vector            X(dim), Xc(3);
   Vector            normal(dim);
   Tensor            F(dim,dim-1);
   VectorXi          map(n_dofs_u_per_facet);
@@ -212,14 +212,14 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
       }
     }
 
-    dof_handler[DH_MESH].getVariable(VAR_M).getFacetDofs(map.data(), &*facet);
+    dof_handler[DH_MESH].getVariable(VAR_M).getFacetDofs(map.data(), &*facet); //std::cout << map.transpose() << std::endl;
 
-    mesh->getFacetNodesId(&*facet, facet_nodes.data()); //std::cout << facet_nodes.transpose();
+    mesh->getFacetNodesId(&*facet, facet_nodes.data()); //std::cout << facet_nodes.transpose() << std::endl;
     if (virtual_mesh)
       VecGetValues(*Vec_x_1, map.size(), map.data(), x_coefs.data());
     else
       mesh->getNodesCoords(facet_nodes.begin(), facet_nodes.end(), x_coefs.data());
-    x_coefs_trans = x_coefs.transpose(); //std::cout << std::endl << x_coefs_trans << std::endl;
+    x_coefs_trans = x_coefs.transpose(); //std::cout << x_coefs_trans << std::endl;
 
     // fix orientation in the case where the gas phase isn't passive
     {
@@ -365,13 +365,14 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
     {
       normal(0) = x_coefs_trans(1,1)-x_coefs_trans(1,0);
       normal(1) = x_coefs_trans(0,0)-x_coefs_trans(0,1);
-
-      normal /= (x_coefs_trans.col(0)-x_coefs_trans.col(1)).squaredNorm();
+      normal /= (x_coefs_trans.col(0)-x_coefs_trans.col(1)).squaredNorm();//consistent normal
+      //normal.normalize();                                                   //mass conserving normal
+      //normal *= ((x_coefs_trans.col(0)-x_coefs_trans.col(1)).norm());     //mass conserving normal
       normal *= sign_;
-      if (contrib_0)
-        VecSetValues(Vec_normal_, dim, map.data()+0*dim, normal.data(), ADD_VALUES);
-      if (contrib_1)
-        VecSetValues(Vec_normal_, dim, map.data()+1*dim, normal.data(), ADD_VALUES);
+      if (contrib_0) //contribution to node a
+        VecSetValues(Vec_normal_, dim, map.data()+0*dim, normal.data(), ADD_VALUES); //map.data(): pointer to position 0,
+      if (contrib_1) //contribution to node b                                        //map.data()+1*dim: pointer to position
+        VecSetValues(Vec_normal_, dim, map.data()+1*dim, normal.data(), ADD_VALUES); //dim, so takes 0 and 1 first, then 2 and 3
       //if (is_surface)
       //cout << "normal = " << normal(0) << " " << normal(1) << endl;
     }
@@ -379,7 +380,9 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
     {
       normal(0) = x_coefs_trans(1,2)-x_coefs_trans(1,0);
       normal(1) = x_coefs_trans(0,0)-x_coefs_trans(0,2);
-      normal /= (x_coefs_trans.col(0)-x_coefs_trans.col(2)).squaredNorm();
+      //normal /= (x_coefs_trans.col(0)-x_coefs_trans.col(2)).squaredNorm();
+      normal.normalize();
+      normal *= ((x_coefs_trans.col(0)-x_coefs_trans.col(2)).norm()/2);
       normal *= sign_;
       if (contrib_0)
         VecSetValues(Vec_normal_, dim, map.data()+0*dim, normal.data(), ADD_VALUES);
@@ -387,7 +390,9 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
 
       normal(0) = x_coefs_trans(1,1)-x_coefs_trans(1,2);
       normal(1) = x_coefs_trans(0,2)-x_coefs_trans(0,1);
-      normal /= (x_coefs_trans.col(1)-x_coefs_trans.col(2)).squaredNorm();
+      //normal /= (x_coefs_trans.col(1)-x_coefs_trans.col(2)).squaredNorm();
+      normal.normalize();
+      normal *= ((x_coefs_trans.col(1)-x_coefs_trans.col(2)).norm()/2);
       normal *= sign_;
       if (contrib_1)
         VecSetValues(Vec_normal_, dim, map.data()+1*dim, normal.data(), ADD_VALUES);
@@ -432,11 +437,25 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
       VecSetValues(Vec_normal_, dim, map.data(), normal.data(), INSERT_VALUES);
       Assembly(Vec_normal_);
     }
+    if (is_curvt && (is_fsi || is_slv))
+    {
+      point->getCoord(X.data(),dim);
+      Xc << 8.0, 8.0, 0.0;
+      normal = exact_normal_ellipse(X,Xc,0.0,1.20,0.12,dim);
+
+      VecSetValues(Vec_normal_, dim, map.data(), normal.data(), INSERT_VALUES);
+      Assembly(Vec_normal_);
+    }
 
   }
   Assembly(Vec_normal_);
 
 }
+
+//void AppCtx::getVecNormals(Vec const* Vec_normal_, Vec & Vec_tangent)
+//{
+
+//}
 
 /// @param[out] Vec_normal_
 /// @param[out] Vec_x_
@@ -1360,7 +1379,7 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
       if (force_mesh_velocity)
       {
         VecGetValues(Vec_x_0, dim, node_dofs_mesh.data(), X0.data());  //node mesh vel value
-        if (N_Solids && is_slipv) VecCopy(Vec_slipv_0, Vec_slipv_1);
+        if (is_sfip && is_slipv) VecCopy(Vec_slipv_0, Vec_slipv_1);
         //k1 = v_exact(X0,tt,tag);
         //k2 = v_exact(X0+0.5*k1*dt,tt+0.5*dt,tag);
         //k3 = v_exact(X0+0.5*k2*dt,tt+0.5*dt,tag);
@@ -1405,15 +1424,15 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
       }  //if for RK4  //end if force_mesh_velocity
       else
       {
-        if ( false && (  is_in(tag, neumann_tags) || is_in(tag, dirichlet_tags) || is_in(tag, periodic_tags)   )   )
+        if ( true && (  is_in(tag, neumann_tags) || is_in(tag, dirichlet_tags) || is_in(tag, periodic_tags)   )   )
         {
           tmp.setZero();
           VecSetValues(Vec_v_mid, dim, node_dofs_mesh.data(), tmp.data(), INSERT_VALUES);
         }
         else
         {
-          if (nodsum){
-            Vm = vectorSolidMesh(nodsum,&*point,nod_vs);
+          if (nodsum){                                    //enforces solid motion for the
+            Vm = vectorSolidMesh(nodsum,&*point,nod_vs+nod_id);  //nodsum mesh nodes to calculate mesh velocity //ojo antes solo nod_vs
             tmp(0) = Vm(0); tmp(1) = Vm(1); if (dim == 3) tmp(2) = Vm(2);
           }
           else{
@@ -1433,6 +1452,7 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
   //sprintf(buf1,"matrizes/vmid1_%d.m",time_step); sprintf(buf2,"vmidm1_%d",time_step); View(Vec_v_mid, buf1, buf2);
   if (!force_mesh_velocity)
   {
+    cout << "Mesh solver" << endl;
     ierr = SNESSolve(snes_m, PETSC_NULL, Vec_v_mid);  CHKERRQ(ierr);
   }
   //View(Vec_v_mid,"matrizes/vmid2.m","vmidm2");
@@ -1484,7 +1504,81 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
   PetscFunctionReturn(0);
 }
 
+/// @brief vectorSolidMesh acts only in the calculation of the mesh velocity
+/// to enforce the solid motion like advancing of the mesh for solid nodes
+/// it doesn't update neither the center of mass nor the rotation angles
+Vector AppCtx::vectorSolidMesh(int const K, Point const* point, int const vs)
+{
+  VectorXi  dofs(dim);
+  Vector    Vm(Vector::Zero(3)), X_1(3), X_0(3), X_m1(3), X_m2(3), Vs(Vector::Zero(3));;
 
+  getNodeDofs(&*point, DH_MESH, VAR_M, dofs.data());
+
+  if (is_bdf3 && time_step > 1){
+    VecGetValues(Vec_x_cur, dofs.size(), dofs.data(), X_0.data());
+    VecGetValues(Vec_x_0,   dofs.size(), dofs.data(), X_m1.data());
+    VecGetValues(Vec_x_aux, dofs.size(), dofs.data(), X_m2.data());
+    X_1 = RotM(theta_1[K-1]-theta_0[K-1],dim)*(X_0 - XG_0[K-1]) + XG_1[K-1];
+    Vm  = (11./6.*X_1 - 3.0*X_0 + 3./2.*X_m1 - 1./3.*X_m2)/dt;
+  }
+  else if (is_bdf2 && time_step > 0){
+    if (is_bdf2_bdfe){
+      VecGetValues(Vec_x_cur, dofs.size(), dofs.data(), X_0.data());
+      VecGetValues(Vec_x_0,   dofs.size(), dofs.data(), X_m1.data());
+      X_1 = RotM(theta_1[K-1]-theta_0[K-1],dim)*(X_0 - XG_0[K-1]) + XG_1[K-1];
+      Vm  = (3./2.*X_1 - 2.0*X_0 + 1./2.*X_m1)/dt;
+    }
+    else if (is_bdf2_ab){
+      VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X_0.data());
+      X_1 = RotM(theta_1[K-1]-theta_0[K-1],dim)*(X_0 - XG_0[K-1]) + XG_1[K-1];
+      Vm  = (X_1 - X_0)/dt;
+    }
+  }
+  else{  //for MR-AB and basic, and for all at time = t0
+    VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X_0.data());
+    X_1 = RotM(theta_1[K-1]-theta_0[K-1],dim)*(X_0 - XG_0[K-1]) + XG_1[K-1];
+    Vm  = (X_1 - X_0)/dt;
+  }
+
+  if (vs && !is_sslv){
+    VecGetValues(Vec_slipv_0, dim, dofs.data(), Vs.data());
+    Vs = RotM(theta_1[vs-1]-theta_0[vs-1],dim)*Vs;// + XG_1[nod_id+nod_is-1]; // - XG_0[nod_id+nod_is-1];
+    VecSetValues(Vec_slipv_1, dim, dofs.data(), Vs.data(), INSERT_VALUES);
+  }
+
+  return Vm;
+}
+
+PetscErrorCode AppCtx::updateSolidMesh()
+{
+  int tag, nod_id, nod_is, nod_vs, nodsum;
+  VectorXi  dofs(dim);
+  Vector    X0(Vector::Zero(3)), Vs(Vector::Zero(3));
+
+  point_iterator point = mesh->pointBegin();
+  point_iterator point_end = mesh->pointEnd();
+  for (; point != point_end; ++point)
+  {
+    tag = point->getTag();
+
+    nod_id = is_in_id(tag,flusoli_tags);
+    nod_is = is_in_id(tag,solidonly_tags);
+    nod_vs = is_in_id(tag,slipvel_tags);
+    nodsum = nod_id+nod_is+nod_vs;
+    if (nodsum){
+      getNodeDofs(&*point, DH_MESH, VAR_M, dofs.data());
+      VecGetValues(Vec_x_0, dofs.size(), dofs.data(), X0.data());
+      X0 = RotM(theta_1[nodsum-1]-theta_0[nodsum-1],dim)*(X0 - XG_0[nodsum-1]) + XG_1[nodsum-1];// - XG_0[nodsum-1];
+      VecSetValues(Vec_x_1, dofs.size(), dofs.data(), X0.data(), INSERT_VALUES);
+      if (nod_vs){
+        VecGetValues(Vec_slipv_0, dim, dofs.data(), Vs.data());
+        Vs = RotM(theta_1[nod_vs-1]-theta_0[nod_vs-1],dim)*Vs;// + XG_1[nod_id+nod_is-1]; // - XG_0[nod_id+nod_is-1];
+        VecSetValues(Vec_slipv_1, dim, dofs.data(), Vs.data(), INSERT_VALUES);
+      }
+    }
+  }
+  PetscFunctionReturn(0);
+}
 
 /// @brief move the implicit mesh.
 ///
@@ -1662,7 +1756,7 @@ double AppCtx::getCellPatchQuality(Vec const& Vec_x_, int const* cells) const
 }
 
 // =====================================================================
-// Luzia methods
+// Luzia's methods
 // =====================================================================
 
 double AppCtx::quality_m(Mesh *mesh)
@@ -1718,7 +1812,7 @@ double AppCtx::quality_e(Cell const* cell, const int j, Mesh const* mesh)
 double AppCtx::sizeField(double *coords)
 {
   double Lc = 0, dist = 1.0, L_range = 10*h_star;
-  Vector Xg(dim);
+  Vector3d Xg;
   for(int i = 0; i < N_Solids; i++)
   {
     Xg = XG_1[i];
@@ -1839,7 +1933,9 @@ PetscErrorCode AppCtx::meshAdapt_l()
           tag_b = mesh->getNodePtr(edge_nodes[1])->getTag();
           tag_e = edge->getTag();
 
-          if (is_in(tag_e, flusoli_tags))
+          if (is_in(tag_e, solidonly_tags) || is_in(tag_e, flusoli_tags) || is_in(tag_e, slipvel_tags))
+            continue;
+          if (is_in(tag_e, flusoli_tags) || is_in(tag_e, solidonly_tags))
             continue;
           if (!( tag_a==tag_b && tag_b==tag_e ))  //only edges inside the same type of domain
             continue;                                                  //(ex: inside fluid)
@@ -1854,7 +1950,7 @@ PetscErrorCode AppCtx::meshAdapt_l()
           //printf("COLLAPSED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
           //printf("COLLAPSING  tags = %d  %d %d #################################################\n", tag_a, tag_b, tag_e);
           int pt_id = MeshToolsTri::collapseEdge2d(edge->getIncidCell(), edge->getPosition(), 0.0, &*mesh); //0.5 para Luzia
-          printf("COLLAPSED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
+          //printf("COLLAPSED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
         }
       }
     }//end for collapse
@@ -1896,7 +1992,9 @@ PetscErrorCode AppCtx::meshAdapt_l()
           tag_b = mesh->getNodePtr(edge_nodes[1])->getTag();
           tag_e = edge->getTag();
 
-          if (is_in(tag_e, flusoli_tags))
+          if (is_in(tag_e, solidonly_tags) || is_in(tag_e, flusoli_tags) || is_in(tag_e, slipvel_tags))
+            continue;
+          if (is_in(tag_e, flusoli_tags) || is_in(tag_e, solidonly_tags))
             continue;
           if (!( tag_a==tag_b && tag_b==tag_e ))  //only edges inside the same type of domain
             continue;                                                  //(ex: inside fluid)
@@ -1914,7 +2012,7 @@ PetscErrorCode AppCtx::meshAdapt_l()
 
           mesh_was_changed = true;
           int pt_id = MeshToolsTri::insertVertexOnEdge(edge->getIncidCell(), edge->getPosition(), 0.5, &*mesh);
-          printf("INSERTED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
+          //printf("INSERTED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
           adde_vtcs.push_back(make_tuple(pt_id, edge_nodes[0], edge_nodes[1]));
           mesh->getNodePtr(pt_id)->setMarkedTo(true);
           if (pt_id < (int)mesh_sizes.size())
@@ -1943,7 +2041,9 @@ PetscErrorCode AppCtx::meshAdapt_l()
   Destroy(Vec_res_fs);
   Destroy(Vec_res_m);
   Destroy(Vec_normal);
+  Destroy(Vec_tangent);
   Destroy(Vec_v_mid);
+  Destroy(Vec_v_1);
   SNESReset(snes_fs);
   SNESReset(snes_m);
   KSPReset(ksp_fs);
@@ -1951,37 +2051,57 @@ PetscErrorCode AppCtx::meshAdapt_l()
   PCReset(pc_fs);
   PCReset(pc_m);
   SNESLineSearchReset(linesearch);
+  if (is_sslv){
+    Destroy(Vec_slip_rho);
+    Destroy(Vec_normal_aux);
+    Destroy(Vec_rho_aux);
+    Destroy(Mat_Jac_s);
+    Destroy(Vec_res_s);
+    SNESReset(snes_s);
+    KSPReset(ksp_s);
+    PCReset(pc_s);
+    SNESLineSearchReset(linesearch_s);
+  }
+  if (time_adapt){
+    Destroy(Vec_uzp_time_aux);
+    Destroy(Vec_x_time_aux);
+  }
 
   DofHandler  dof_handler_tmp[2];
 
-  // tranfers variables values from old to new mesh
+  // transfers variables values from old to new mesh
   {
-    // First fix the u-p unknows
+    // First fix the u-p unknowns
     dof_handler_tmp[DH_MESH].copy(dof_handler[DH_MESH]);
     dof_handler_tmp[DH_UNKM].copy(dof_handler[DH_UNKM]);  //dof_handler_tmp[DH_UNKS].copy(dof_handler[DH_UNKS]);
 
     dofsUpdate();  //updates DH_ information: # variables u, z, p, mesh can change
-    cout << "#z=" << n_unknowns_fs << " #u=" << n_unknowns_u << " #v=" << n_dofs_v_mesh  << endl;
+    cout << "#z=" << n_nodes_fsi << " #u=" << n_unknowns_u << " #p=" << n_unknowns_p << " #v=" << n_dofs_v_mesh  << endl;
 
-    int n_solid_nodes_0 = dof_handler_tmp[DH_UNKM].getVariable(VAR_Z).numPositiveDofs()/3;
-    int n_solid_nodes_1 = dof_handler    [DH_UNKM].getVariable(VAR_Z).numPositiveDofs()/3;
-    int p_id_cor_0 = 3*(n_solid_nodes_0-N_Solids);
-    int p_id_cor_1 = 3*(n_solid_nodes_1-N_Solids);
-    //cout << n_solid_nodes_0 << " " << n_solid_nodes_1 << endl;
-
-    Vec *petsc_vecs[] = {&Vec_uzp_0, &Vec_uzp_1, &Vec_x_0, &Vec_x_1}; //Vec *petsc_vecs[] = {&Vec_up_0, &Vec_up_1, &Vec_x_0, &Vec_x_1};
-    int DH_t[]        = {DH_UNKM, DH_UNKM, DH_MESH, DH_MESH}; //int DH_t[]       = {DH_UNKS , DH_UNKS , DH_MESH, DH_MESH};
-    int n_unks_t[]    = {n_unknowns_fs, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh};
-    //cout << n_unknowns_fs << " " << n_unknowns_u << " " << n_dofs_v_mesh << endl;
+    Vec *petsc_vecs[] = {&Vec_uzp_0,    &Vec_uzp_1,    &Vec_x_0,      &Vec_x_1,      &Vec_uzp_m1,   &Vec_x_aux,    &Vec_uzp_m2,   &Vec_slipv_0,  &Vec_slipv_1,  &Vec_slipv_m1, &Vec_slipv_m2};
+    int DH_t[]        = {DH_UNKM,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_UNKM,       DH_MESH,       DH_MESH,       DH_MESH,       DH_MESH      };
+    int n_unks_t[]    = {n_unknowns_fs, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_unknowns_fs, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh, n_dofs_v_mesh};
+    int L = 4;
+    if (is_slipv){L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
+    else{
+      if(is_bdf2){L = 5;}
+      else if (is_bdf3){L = 7;}//{L = static_cast<int>( sizeof(DH_t)/sizeof(int) );}
+    }
     std::vector<Real> temp;
-    //cout << static_cast<int>( sizeof(DH_t)/sizeof(int) ) << endl;  // es 4 = size(DH_t)
+
     // NOTE: the mesh must not be changed in this loop
-    for (int v = 0; v < static_cast<int>( sizeof(DH_t)/sizeof(int) ); ++v)
+    for (int v = 0; v < L; ++v)
     {
+      if (is_slipv){
+        if ((is_mr_ab || is_basic) && (v == 4 || v == 5 || v == 6 || v == 9 || v == 10))
+          continue;
+        else if (is_bdf2 && (v == 5 || v == 6 || v == 10))
+          continue;
+      }
+
       int vsize;
-      VecGetSize(*petsc_vecs[v], &vsize);  //size of Vec_uzp_0, Vec_uzp_1, Vec_x_0, Vec_x_1
+      VecGetSize(*petsc_vecs[v], &vsize);  //size of Vec_uzp_0, Vec_uzp_1, Vec_x_0, Vec_x_1 (old mesh)
       temp.assign(vsize, 0.0);
-      //cout << "v = " << v << endl;
       double *array;
 
       // copy
@@ -1989,15 +2109,16 @@ PetscErrorCode AppCtx::meshAdapt_l()
       for (int i = 0; i < vsize; ++i)
         temp[i] = array[i];
       VecRestoreArray(*petsc_vecs[v], &array);
-      Destroy(*petsc_vecs[v]);  //ierr = VecDestroy(&*petsc_vecs[v]);  CHKERRQ(ierr);
+      Destroy(*petsc_vecs[v]);
       ierr = VecCreate(PETSC_COMM_WORLD, petsc_vecs[v]);                              CHKERRQ(ierr);
       ierr = VecSetSizes(*petsc_vecs[v], PETSC_DECIDE, n_unks_t[v]);                  CHKERRQ(ierr);  //dof_handler[DH_t[v]].numDofs()
       ierr = VecSetFromOptions(*petsc_vecs[v]);                                       CHKERRQ(ierr);
-      if (v == 0 || v == 1){//DH_UNKM
-        ierr = VecSetOption(*petsc_vecs[v], VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+      if (v == 0 || v == 1 || v == 4 || v == 6){//DH_UNKM
+        ierr = VecSetOption(*petsc_vecs[v],VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
       }
 
-      int tagP, nod_id;
+      std::vector<bool>   SV(N_Solids,false);  //solid visited history
+      int tagP, nod_id, dofs_fs_0, dofs_fs_1, nod_vs, nodsum;
 
       int dofs_0[64]; // old
       int dofs_1[64]; // new
@@ -2008,61 +2129,40 @@ PetscErrorCode AppCtx::meshAdapt_l()
         if (!mesh->isVertex(&*point))
           continue;
 
-        tagP = point->getTag();
-        nod_id = is_in_id(tagP,flusoli_tags);
-
         if (!point->isMarked())
         {
-          for (int k = 0; k < dof_handler_tmp[DH_t[v]].numVars(); ++k)  //ranges over # variables = 3 = u,z,p or 1 = mesh
+          for (int k = 0; k < dof_handler_tmp[DH_t[v]].numVars(); ++k)  //ranges over # variables = 2 = u,p or 1 = mesh
           {
-            if (v == 0 || v == 1){//DH_UNKM
-              if (nod_id){
-                if(k == VAR_Z){
-                  for (int l = 0; l < 3; l++){  // the 3 here is for Z quantity of Dofs for 2D case
-                    dofs_0[l] = dof_handler_tmp[DH_t[v]].getVariable(VAR_U).numPositiveDofs() - 1
-                              + 3*nod_id - 2 + l;
-                    dofs_1[l] = dof_handler    [DH_t[v]].getVariable(VAR_U).numPositiveDofs() - 1
-                              + 3*nod_id - 2 + l;
-                  }
-                  for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
-                    array[dofs_1[j]] = temp.at(dofs_0[j]);
+            dof_handler_tmp[DH_t[v]].getVariable(k).getVertexDofs(dofs_0, mesh->getPointId(&*point));
+            dof_handler    [DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
+            for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
+              array[dofs_1[j]] = temp.at(dofs_0[j]);
+          }//end for k
+          if (v == 0 || v == 1 || v == 4 || v == 6){
+            tagP = point->getTag();
+            nod_id = is_in_id(tagP,flusoli_tags);
+            nod_vs = is_in_id(tagP,slipvel_tags);
+            nodsum = nod_id+nod_vs;
+            if (nodsum){
+              if (!SV[nodsum-1]){
+                for (int l = 0; l < LZ; l++){
+                  dofs_fs_0 = dof_handler_tmp[DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
+                              dof_handler_tmp[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nodsum-1) + l;
+                  dofs_fs_1 = dof_handler    [DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
+                              dof_handler    [DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nodsum-1) + l;
+                  array[dofs_fs_1] = temp.at(dofs_fs_0);
                 }
-                else if (k == VAR_P){
-                  dof_handler_tmp[DH_t[v]].getVariable(k).getVertexDofs(dofs_0, mesh->getPointId(&*point));
-                  dof_handler    [DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-                  dofs_0[0] = dofs_0[0] - p_id_cor_0;
-                  dofs_1[0] = dofs_1[0] - p_id_cor_1;
-                  for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
-                    array[dofs_1[j]] = temp.at(dofs_0[j]);
-                }
-              }
-              else{
-                if (k == VAR_U){
-                  dof_handler_tmp[DH_t[v]].getVariable(k).getVertexDofs(dofs_0, mesh->getPointId(&*point));
-                  dof_handler    [DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-                  for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
-                    array[dofs_1[j]] = temp.at(dofs_0[j]);
-                }
-                else if (k == VAR_P){
-                  dof_handler_tmp[DH_t[v]].getVariable(k).getVertexDofs(dofs_0, mesh->getPointId(&*point));
-                  dof_handler    [DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-                  dofs_0[0] = dofs_0[0] - p_id_cor_0;
-                  dofs_1[0] = dofs_1[0] - p_id_cor_1;
-                  for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
-                    array[dofs_1[j]] = temp.at(dofs_0[j]);
-                }
+                SV[nodsum-1] = true;
               }
             }
-            else if (v == 2 || v == 3){//DH_MESH
-              dof_handler_tmp[DH_t[v]].getVariable(k).getVertexDofs(dofs_0, mesh->getPointId(&*point));
-              dof_handler    [DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-              for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
-                array[dofs_1[j]] = temp.at(dofs_0[j]);
-            }//end if value v
-          }//end for k
+          }
         }//end if !marked
       }//end for point
       // interpolate values at new points
+
+      //if (v == 7 || v == 8 || v == 9 || v == 10)
+      //  continue;
+
       std::list<EdgeVtcs>::iterator it     = adde_vtcs.begin();
       std::list<EdgeVtcs>::iterator it_end = adde_vtcs.end();
       for (; it != it_end; ++it)
@@ -2076,65 +2176,42 @@ PetscErrorCode AppCtx::meshAdapt_l()
         Point const* link[] = {pt_a, pt_b};
         int const Nlinks = sizeof(link)/sizeof(Point*);
         double const weight = 1./Nlinks;
-        tagP = point->getTag();
-        nod_id = is_in_id(tagP,flusoli_tags);
+        VectorXi  dofs_fs(LZ);
+        Vector    X(dim);
+        Vector    Uf(dim), Zf(LZ);
+
         for (int k = 0; k < dof_handler_tmp[DH_t[v]].numVars(); ++k)
         {
-          if (v == 0 || v == 1){//DH_UNKM
-            if(nod_id){
-              if (k == VAR_Z){
-                cout << "FALTA!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!mesh 1063" << endl; //TODO: actualizar
-              }
-              else if (k == VAR_P){
-                dof_handler[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-                for (int j = 0; j < Nlinks; ++j)
-                {
-                  dof_handler_tmp[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_0, link[j]);
-                  dofs_0[0] = dofs_0[0] - p_id_cor_0;
-                  dofs_1[0] = dofs_1[0] - p_id_cor_1;
-                  for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
-                    array[dofs_1[c]] += weight*temp[dofs_0[c]];
-                }
-              }
-            }
-            else{
-              if (k == VAR_U){
-                dof_handler[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-                for (int j = 0; j < Nlinks; ++j)
-                {
-                  dof_handler_tmp[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_0, link[j]);
-                  for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
-                    array[dofs_1[c]] += weight*temp[dofs_0[c]];
-                }
-              }
-              else if(k == VAR_P){
-                dof_handler[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-                for (int j = 0; j < Nlinks; ++j)
-                {
-                  dof_handler_tmp[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_0, link[j]);
-                  dofs_0[0] = dofs_0[0] - p_id_cor_0;
-                  dofs_1[0] = dofs_1[0] - p_id_cor_1;
-                  for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
-                    array[dofs_1[c]] += weight*temp[dofs_0[c]];
-                }
-              }
-            }
-          }//end DH_UNKM
-          else if (v == 2 || v == 3){//DH_MESH
-            dof_handler[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
-            for (int j = 0; j < Nlinks; ++j)
-            {
-              dof_handler_tmp[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_0, link[j]);
-              for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
-                array[dofs_1[c]] += weight*temp[dofs_0[c]];
-            }
+          dof_handler[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_1, &*point);
+          for (int j = 0; j < Nlinks; ++j)
+          {
+            dof_handler_tmp[DH_t[v]].getVariable(k).getVertexAssociatedDofs(dofs_0, link[j]);
+            for (int c = 0; c < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++c)
+              array[dofs_1[c]] += weight*temp[dofs_0[c]];
           }
-        } //end DH_MESH
-      } //end for k variables
+          if ((v == 0 || v == 1 || v == 4 || v == 6) && (k == VAR_U)){
+            tagP = point->getTag();
+            nod_id = is_in_id(tagP,flusoli_tags);
+            nod_vs = is_in_id(tagP,slipvel_tags);
+            nodsum = nod_id+nod_vs;
+            if (nodsum){
+              for (int l = 0; l < LZ; l++){
+                dofs_fs_1 = dof_handler[DH_t[v]].getVariable(VAR_U).numPositiveDofs() +
+                            dof_handler[DH_t[v]].getVariable(VAR_P).numPositiveDofs() + LZ*(nodsum-1) + l;
+                Zf(l) = array[dofs_fs_1];
+              }
+              point->getCoord(X.data(),dim);
+              Uf = SolidVel(X, XG_1[nodsum-1], Zf, dim);
+              for (int j = 0; j < dof_handler_tmp[DH_t[v]].getVariable(k).numDofsPerVertex(); ++j)
+                array[dofs_1[j]] = Uf(j);
+            }
+          }//end if
+        }//end for k
+      }//end for it
       VecRestoreArray(*petsc_vecs[v], &array);
       Assembly(*petsc_vecs[v]);
     } // end loop in vectors
-    //Destroy(Vec_uzp_1);
+
     std::list<EdgeVtcs>::iterator it     = adde_vtcs.begin();
     std::list<EdgeVtcs>::iterator it_end = adde_vtcs.end();
     for (; it != it_end; ++it)
@@ -2143,36 +2220,76 @@ PetscErrorCode AppCtx::meshAdapt_l()
       mesh->getNodePtr(pt_id)->setMarkedTo(false);
     }
 
-  } // end tranf
+  } // end transference
 
   //Vec Vec_res;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);                     CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_res_fs, PETSC_DECIDE, n_unknowns_fs);         CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_res_fs);                                CHKERRQ(ierr);
-
-  //Vec Vec_v_mid
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                  CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_v_mid, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_v_mid);                             CHKERRQ(ierr);
-
-  //Vec Vec_normal;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal);                  CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_normal, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_normal);                             CHKERRQ(ierr);
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);               CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_res_fs, PETSC_DECIDE, n_unknowns_fs);   CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_res_fs);                          CHKERRQ(ierr);
 
   //Vec Vec_res_m;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_m);                     CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);         CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_res_m);
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_m);                CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_res_m);                           CHKERRQ(ierr);
+
+  //Vec Vec_v_mid
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_v_mid, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_v_mid);                           CHKERRQ(ierr);
+
+  //Vec Vec_v_1
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_1);                  CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_v_1, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_v_1);                             CHKERRQ(ierr);
+
+  //Vec Vec_normal;
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal);               CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_normal, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_normal);                          CHKERRQ(ierr);
+
+  //Vec Vec_tangent;
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_tangent);               CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_tangent, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_tangent);                          CHKERRQ(ierr);
+
+  if (is_bdf2 || is_bdf3)
+  {
+    //Vec Vec_x_cur; current
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_x_cur);              CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_x_cur, PETSC_DECIDE, n_dofs_v_mesh);  CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_x_cur);                         CHKERRQ(ierr);
+  }
+
+  if (time_adapt)
+  {
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_uzp_time_aux);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_uzp_time_aux, PETSC_DECIDE, n_unknowns_fs);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_uzp_time_aux);                                 CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_uzp_time_aux, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_x_time_aux);                  CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_x_time_aux, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_x_time_aux);                             CHKERRQ(ierr);
+  }
 
   std::vector<int> nnz;
+
+  {
+    nnz.resize(dof_handler[DH_UNKM].numDofs()+N_Solids*LZ,0);
+    std::vector<SetVector<int> > tabla;
+    dof_handler[DH_UNKM].getSparsityTable(tabla); // TODO: melhorar desempenho, função mt lenta
+    //FEP_PRAGMA_OMP(parallel for)
+     for (int i = 0; i < n_unknowns_fs - N_Solids*LZ; ++i)
+       nnz[i] = tabla[i].size();
+  }
 
   //Mat Mat_Jac;
   ierr = MatCreate(PETSC_COMM_WORLD, &Mat_Jac_fs);                                      CHKERRQ(ierr);
   ierr = MatSetSizes(Mat_Jac_fs, PETSC_DECIDE, PETSC_DECIDE, n_unknowns_fs, n_unknowns_fs);   CHKERRQ(ierr);
   ierr = MatSetFromOptions(Mat_Jac_fs);                                                 CHKERRQ(ierr);
-  ierr = MatSeqAIJSetPreallocation(Mat_Jac_fs, PETSC_DEFAULT, NULL);                    CHKERRQ(ierr);
+  ierr = MatSeqAIJSetPreallocation(Mat_Jac_fs, 0, nnz.data());                          CHKERRQ(ierr);
   ierr = MatSetOption(Mat_Jac_fs,MAT_NEW_NONZERO_ALLOCATION_ERR,PETSC_FALSE);           CHKERRQ(ierr);
+  //ierr = MatSeqAIJSetPreallocation(Mat_Jac_fs, PETSC_DEFAULT, NULL);                    CHKERRQ(ierr);
 
   // mesh
   nnz.clear();
@@ -2212,12 +2329,66 @@ PetscErrorCode AppCtx::meshAdapt_l()
   ierr = SNESGetKSP(snes_m,&ksp_m);                                                      CHKERRQ(ierr);
   ierr = KSPGetPC(ksp_m,&pc_m);                                                          CHKERRQ(ierr);
   ierr = KSPSetOperators(ksp_m,Mat_Jac_m,Mat_Jac_m,SAME_NONZERO_PATTERN);                CHKERRQ(ierr);
-
+  ierr = KSPSetType(ksp_m,KSPPREONLY);                                                   CHKERRQ(ierr);
+  ierr = PCSetType(pc_m,PCLU);                                                           CHKERRQ(ierr);
+  ierr = SNESSetFromOptions(snes_m); CHKERRQ(ierr);
   if(!nonlinear_elasticity)
   {
     ierr = SNESSetType(snes_m, SNESKSPONLY); CHKERRQ(ierr);
   }
-  ierr = SNESSetFromOptions(snes_m); CHKERRQ(ierr);
+
+  if (is_sslv){
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_s);                CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_res_s, PETSC_DECIDE, n_unknowns_sv);    CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_res_s);                           CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slip_rho);               CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_slip_rho, PETSC_DECIDE, n_unknowns_sv);   CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_slip_rho);                          CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_slip_rho, VEC_IGNORE_NEGATIVE_INDICES, PETSC_TRUE);  CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal_aux);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_normal_aux, PETSC_DECIDE, n_dofs_v_mesh);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_normal_aux);                                 CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_rho_aux);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_rho_aux, PETSC_DECIDE, n_unknowns_sv);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_rho_aux);                                 CHKERRQ(ierr);
+
+    nnz.clear();
+    int n_pho_dofs = n_unknowns_sv;
+    {
+      std::vector<SetVector<int> > tabli;
+      dof_handler[DH_SLIP].getSparsityTable(tabli); // TODO: melhorar desempenho, função mt lenta
+
+      nnz.resize(n_pho_dofs, 0);
+
+      //FEP_PRAGMA_OMP(parallel for)
+      for (int i = 0; i < n_pho_dofs; ++i)
+        {nnz[i] = tabli[i].size();}  //cout << nnz[i] << " ";} //cout << endl;
+    }
+
+    ierr = MatCreate(PETSC_COMM_WORLD, &Mat_Jac_s);                                     CHKERRQ(ierr);
+    ierr = MatSetType(Mat_Jac_s, MATSEQAIJ);                                            CHKERRQ(ierr);
+    ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, n_pho_dofs, n_pho_dofs);  CHKERRQ(ierr);
+    ierr = MatSeqAIJSetPreallocation(Mat_Jac_s,  0, nnz.data());                        CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_NEW_NONZERO_ALLOCATION_ERR,PETSC_FALSE);          CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_SYMMETRIC,PETSC_TRUE);                            CHKERRQ(ierr);
+
+    ierr = SNESCreate(PETSC_COMM_WORLD, &snes_s);                                       CHKERRQ(ierr);
+    ierr = SNESSetFunction(snes_s, Vec_res_s, FormFunction_sqrm, this);                 CHKERRQ(ierr);
+    ierr = SNESSetJacobian(snes_s, Mat_Jac_s, Mat_Jac_s, FormJacobian_sqrm, this);      CHKERRQ(ierr);
+    ierr = SNESGetLineSearch(snes_s,&linesearch_s);
+    ierr = SNESLineSearchSetType(linesearch_s,SNESLINESEARCHBASIC);
+    ierr = SNESGetKSP(snes_s,&ksp_s);                                                   CHKERRQ(ierr);
+    ierr = KSPGetPC(ksp_s,&pc_s);                                                       CHKERRQ(ierr);
+    ierr = KSPSetOperators(ksp_s,Mat_Jac_s,Mat_Jac_s,SAME_NONZERO_PATTERN);             CHKERRQ(ierr);
+    ierr = KSPSetType(ksp_s,KSPPREONLY);                                                CHKERRQ(ierr);
+    ierr = PCSetType(pc_s,PCLU);                                                        CHKERRQ(ierr);
+    ierr = SNESSetType(snes_s, SNESKSPONLY);                                            CHKERRQ(ierr);
+    ierr = SNESSetFromOptions(snes_s);
+    ierr = SNESSetType(snes_s, SNESKSPONLY);                                            CHKERRQ(ierr);
+  }
 
   // check
   if (false)
@@ -2262,6 +2433,10 @@ PetscErrorCode AppCtx::meshAdapt_l()
 
   PetscFunctionReturn(0);
 }
+
+// =====================================================================
+// end Luzia's methods
+// =====================================================================
 
 void AppCtx::smoothsMesh_s(Vec &Vec_normal_, Vec &Vec_x_)
 {
@@ -2543,9 +2718,9 @@ PetscErrorCode AppCtx::meshAdapt_s()
 
   double Qmesh = quality_m(&*mesh);
 
-  if (true /*Qmesh < Q_star*/){
+  if (Qmesh < Q_star /*true*/){
 
-    cout << "Entering Mesh quality test " << Qmesh << " < " << Q_star << endl;
+    cout << endl << "Entering Mesh quality test " << Qmesh << " < " << Q_star << endl;
 
 //    for (int na = 0; na < 5; na++){
     for (int is_splitting = 0; is_splitting < 2 ; ++is_splitting)
@@ -2591,8 +2766,8 @@ PetscErrorCode AppCtx::meshAdapt_s()
         //Splitting (after Collapsing)
         if (is_splitting)//&& (time_step%2==0))
         {
-          if (is_in(tag_e, dirichlet_tags)){
-            if (false && (quality_f(Xa, Xb) > 1.2)){
+          if (false /*is_in(tag_e, dirichlet_tags)*/){
+            //if (false && (quality_f(Xa, Xb) > 1.2)){
               mesh_was_changed = true;
               int pt_id = MeshToolsTri::insertVertexOnEdge(edge->getIncidCell(), edge->getPosition(), 0.5, &*mesh);
               printf("INSERTED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
@@ -2609,13 +2784,13 @@ PetscErrorCode AppCtx::meshAdapt_s()
                 }
                 mesh_sizes.push_back(expected_h);
               }
-            }
+            //}
           }
           else if ( ((h-expected_h)/expected_h > TOLad) /*|| (quality_f(Xa, Xb) > L_sup)*/ )
           {
             mesh_was_changed = true;
             int pt_id = MeshToolsTri::insertVertexOnEdge(edge->getIncidCell(), edge->getPosition(), 0.5, &*mesh);
-            printf("INSERTED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
+            //printf("INSERTED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
             adde_vtcs.push_back(make_tuple(pt_id, edge_nodes[0], edge_nodes[1]));
             mesh->getNodePtr(pt_id)->setMarkedTo(true);
             if (pt_id < (int)mesh_sizes.size())
@@ -2645,7 +2820,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
           {
             mesh_was_changed = true;
             int pt_id = MeshToolsTri::collapseEdge2d(edge->getIncidCell(), edge->getPosition(), 1.0, &*mesh);
-            printf("COLLAPSED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
+            //printf("COLLAPSED %d !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", pt_id);
             //mesh->getNodePtr(pt_id)->setMarkedTo(true);
           }
         }
@@ -2663,27 +2838,37 @@ PetscErrorCode AppCtx::meshAdapt_s()
   Destroy(Vec_res_fs);
   Destroy(Vec_res_m);
   Destroy(Vec_normal);
+  Destroy(Vec_tangent);
   Destroy(Vec_v_mid);
   Destroy(Vec_v_1);
-  Destroy(Mat_Jac_s);
-  Destroy(Vec_slip_rho);
   SNESReset(snes_fs);
   SNESReset(snes_m);
-  SNESReset(snes_s);
   KSPReset(ksp_fs);
   KSPReset(ksp_m);
-  KSPReset(ksp_s);
   PCReset(pc_fs);
   PCReset(pc_m);
-  PCReset(pc_s);
   SNESLineSearchReset(linesearch);
-  SNESLineSearchReset(linesearch_s);
+  if (is_sslv){
+    Destroy(Vec_slip_rho);
+    Destroy(Vec_normal_aux);
+    Destroy(Vec_rho_aux);
+    Destroy(Mat_Jac_s);
+    Destroy(Vec_res_s);
+    SNESReset(snes_s);
+    KSPReset(ksp_s);
+    PCReset(pc_s);
+    SNESLineSearchReset(linesearch_s);
+  }
+  if (time_adapt){
+    Destroy(Vec_uzp_time_aux);
+    Destroy(Vec_x_time_aux);
+  }
 
   DofHandler  dof_handler_tmp[2];
 
   // transfers variables values from old to new mesh
   {
-    // First fix the u-p unknows
+    // First fix the u-p unknowns
     dof_handler_tmp[DH_MESH].copy(dof_handler[DH_MESH]);
     dof_handler_tmp[DH_UNKM].copy(dof_handler[DH_UNKM]);  //dof_handler_tmp[DH_UNKS].copy(dof_handler[DH_UNKS]);
 
@@ -2832,13 +3017,17 @@ PetscErrorCode AppCtx::meshAdapt_s()
       mesh->getNodePtr(pt_id)->setMarkedTo(false);
     }
 
-
   } // end transference
 
   //Vec Vec_res;
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_fs);               CHKERRQ(ierr);
   ierr = VecSetSizes(Vec_res_fs, PETSC_DECIDE, n_unknowns_fs);   CHKERRQ(ierr);
   ierr = VecSetFromOptions(Vec_res_fs);                          CHKERRQ(ierr);
+
+  //Vec Vec_res_m;
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_m);                CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_res_m);                           CHKERRQ(ierr);
 
   //Vec Vec_v_mid
   ierr = VecCreate(PETSC_COMM_WORLD, &Vec_v_mid);                CHKERRQ(ierr);
@@ -2855,10 +3044,10 @@ PetscErrorCode AppCtx::meshAdapt_s()
   ierr = VecSetSizes(Vec_normal, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
   ierr = VecSetFromOptions(Vec_normal);                          CHKERRQ(ierr);
 
-  //Vec Vec_res_m;
-  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_m);                CHKERRQ(ierr);
-  ierr = VecSetSizes(Vec_res_m, PETSC_DECIDE, n_dofs_v_mesh);    CHKERRQ(ierr);
-  ierr = VecSetFromOptions(Vec_res_m);                           CHKERRQ(ierr);
+  //Vec Vec_tangent;
+  ierr = VecCreate(PETSC_COMM_WORLD, &Vec_tangent);               CHKERRQ(ierr);
+  ierr = VecSetSizes(Vec_tangent, PETSC_DECIDE, n_dofs_v_mesh);   CHKERRQ(ierr);
+  ierr = VecSetFromOptions(Vec_tangent);                          CHKERRQ(ierr);
 
   if (is_bdf2 || is_bdf3)
   {
@@ -2866,6 +3055,18 @@ PetscErrorCode AppCtx::meshAdapt_s()
     ierr = VecCreate(PETSC_COMM_WORLD, &Vec_x_cur);              CHKERRQ(ierr);
     ierr = VecSetSizes(Vec_x_cur, PETSC_DECIDE, n_dofs_v_mesh);  CHKERRQ(ierr);
     ierr = VecSetFromOptions(Vec_x_cur);                         CHKERRQ(ierr);
+  }
+
+  if (time_adapt)
+  {
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_uzp_time_aux);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_uzp_time_aux, PETSC_DECIDE, n_unknowns_fs);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_uzp_time_aux);                                 CHKERRQ(ierr);
+    ierr = VecSetOption(Vec_uzp_time_aux, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);  CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_x_time_aux);                  CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_x_time_aux, PETSC_DECIDE, n_dofs_v_mesh);      CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_x_time_aux);                             CHKERRQ(ierr);
   }
 
   std::vector<int> nnz;
@@ -2924,22 +3125,31 @@ PetscErrorCode AppCtx::meshAdapt_s()
   ierr = SNESGetKSP(snes_m,&ksp_m);                                                      CHKERRQ(ierr);
   ierr = KSPGetPC(ksp_m,&pc_m);                                                          CHKERRQ(ierr);
   ierr = KSPSetOperators(ksp_m,Mat_Jac_m,Mat_Jac_m,SAME_NONZERO_PATTERN);                CHKERRQ(ierr);
-
-  if(!nonlinear_elasticity)
+  ierr = KSPSetType(ksp_m,KSPPREONLY);                                                   CHKERRQ(ierr);
+  ierr = PCSetType(pc_m,PCLU);                                                           CHKERRQ(ierr);
+  ierr = SNESSetFromOptions(snes_m); CHKERRQ(ierr);
+  if(false && !nonlinear_elasticity)
   {
     ierr = SNESSetType(snes_m, SNESKSPONLY); CHKERRQ(ierr);
   }
-  ierr = SNESSetFromOptions(snes_m); CHKERRQ(ierr);
 
   if (is_sslv){
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_s);                CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_res_s, PETSC_DECIDE, n_unknowns_sv);    CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_res_s);                           CHKERRQ(ierr);
+
     ierr = VecCreate(PETSC_COMM_WORLD, &Vec_slip_rho);               CHKERRQ(ierr);
     ierr = VecSetSizes(Vec_slip_rho, PETSC_DECIDE, n_unknowns_sv);   CHKERRQ(ierr);
     ierr = VecSetFromOptions(Vec_slip_rho);                          CHKERRQ(ierr);
     ierr = VecSetOption(Vec_slip_rho, VEC_IGNORE_NEGATIVE_INDICES, PETSC_TRUE);  CHKERRQ(ierr);
 
-    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_res_s);                CHKERRQ(ierr);
-    ierr = VecSetSizes(Vec_res_s, PETSC_DECIDE, n_unknowns_sv);    CHKERRQ(ierr);
-    ierr = VecSetFromOptions(Vec_res_s);                           CHKERRQ(ierr);
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_normal_aux);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_normal_aux, PETSC_DECIDE, n_dofs_v_mesh);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_normal_aux);                                 CHKERRQ(ierr);
+
+    ierr = VecCreate(PETSC_COMM_WORLD, &Vec_rho_aux);                      CHKERRQ(ierr);
+    ierr = VecSetSizes(Vec_rho_aux, PETSC_DECIDE, n_unknowns_sv);          CHKERRQ(ierr);
+    ierr = VecSetFromOptions(Vec_rho_aux);                                 CHKERRQ(ierr);
 
     nnz.clear();
     int n_pho_dofs = n_unknowns_sv;
@@ -2957,19 +3167,15 @@ PetscErrorCode AppCtx::meshAdapt_s()
     ierr = MatCreate(PETSC_COMM_WORLD, &Mat_Jac_s);                                     CHKERRQ(ierr);
     ierr = MatSetType(Mat_Jac_s, MATSEQAIJ);                                            CHKERRQ(ierr);
     ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, n_pho_dofs, n_pho_dofs);  CHKERRQ(ierr);
-    //ierr = MatSetSizes(Mat_Jac_s, PETSC_DECIDE, PETSC_DECIDE, 2*dim*N_Solids, 2*dim*N_Solids);     CHKERRQ(ierr);
     ierr = MatSeqAIJSetPreallocation(Mat_Jac_s,  0, nnz.data());                        CHKERRQ(ierr);
-    //ierr = MatSetFromOptions(Mat_Jac_s);                                                CHKERRQ(ierr);
-    //ierr = MatSeqAIJSetPreallocation(Mat_Jac_s, PETSC_DEFAULT, NULL);                   CHKERRQ(ierr);
-    ierr = MatSetOption(Mat_Jac_s,MAT_NEW_NONZERO_ALLOCATION_ERR,PETSC_FALSE);             CHKERRQ(ierr);
-    ierr = MatSetOption(Mat_Jac_s,MAT_SYMMETRIC,PETSC_TRUE);                               CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_NEW_NONZERO_ALLOCATION_ERR,PETSC_FALSE);          CHKERRQ(ierr);
+    ierr = MatSetOption(Mat_Jac_s,MAT_SYMMETRIC,PETSC_TRUE);                            CHKERRQ(ierr);
 
-    ierr = SNESCreate(PETSC_COMM_WORLD, &snes_s);                                          CHKERRQ(ierr);
-    ierr = SNESSetFunction(snes_s, Vec_res_s, FormFunction_sqrm, this);                    CHKERRQ(ierr);
-    ierr = SNESSetJacobian(snes_s, Mat_Jac_s, Mat_Jac_s, FormJacobian_sqrm, this);         CHKERRQ(ierr);
-    SNESGetLineSearch(snes_s,&linesearch_s);
-    SNESLineSearchSetType(linesearch_s,SNESLINESEARCHBASIC);
-
+    ierr = SNESCreate(PETSC_COMM_WORLD, &snes_s);                                       CHKERRQ(ierr);
+    ierr = SNESSetFunction(snes_s, Vec_res_s, FormFunction_sqrm, this);                 CHKERRQ(ierr);
+    ierr = SNESSetJacobian(snes_s, Mat_Jac_s, Mat_Jac_s, FormJacobian_sqrm, this);      CHKERRQ(ierr);
+    ierr = SNESGetLineSearch(snes_s,&linesearch_s);
+    ierr = SNESLineSearchSetType(linesearch_s,SNESLINESEARCHBASIC);
     ierr = SNESGetKSP(snes_s,&ksp_s);                                                   CHKERRQ(ierr);
     ierr = KSPGetPC(ksp_s,&pc_s);                                                       CHKERRQ(ierr);
     ierr = KSPSetOperators(ksp_s,Mat_Jac_s,Mat_Jac_s,SAME_NONZERO_PATTERN);             CHKERRQ(ierr);
@@ -2977,6 +3183,7 @@ PetscErrorCode AppCtx::meshAdapt_s()
     ierr = PCSetType(pc_s,PCLU);                                                        CHKERRQ(ierr);
     ierr = SNESSetType(snes_s, SNESKSPONLY);                                            CHKERRQ(ierr);
     ierr = SNESSetFromOptions(snes_s);
+    ierr = SNESSetType(snes_s, SNESKSPONLY);                                            CHKERRQ(ierr);
   }
 
   // check
@@ -3020,5 +3227,73 @@ PetscErrorCode AppCtx::meshAdapt_s()
 
   printf("\nMesh adapted.\n\n");
 
+  PetscFunctionReturn(0);
+}
+
+PetscErrorCode AppCtx::getMeshSizes()
+{
+
+  mesh_sizes.reserve(n_nodes_total + 1*n_nodes_total/10);  //modify the capacity of mesh_sizes
+  mesh_sizes.assign(n_nodes_total, 0.0);  //put zeros in the mesh_size vector (n_nodes_total components)
+
+  // stores how much edges were connected until now at each vertex
+  std::vector<int> counter(n_nodes_total, 0);
+
+  VectorXi edge_nodes(3);
+  Vector Xa(dim), Xb(dim);
+  Real h;
+
+  const int n_edges_total = (dim==2) ? mesh->numFacetsTotal() : mesh->numCornersTotal();
+  CellElement const* edge(NULL);
+
+  //FEP_PRAGMA_OMP(for nowait)
+  for (int a = 0; a < n_edges_total; ++a)  //total edges ordered by element ID in .geo
+  {
+    if (dim == 2)
+      edge = mesh->getFacetPtr(a);
+    else
+      edge = mesh->getCornerPtr(a);
+
+    if (edge==NULL || edge->isDisabled())
+      continue;
+
+    if (dim == 2)
+      mesh->getFacetNodesId(a, edge_nodes.data());
+    else
+      mesh->getCornerNodesId(a, edge_nodes.data());
+
+    mesh->getNodePtr(edge_nodes[0])->getCoord(Xa.data(),dim);  //coords node1 of current edge
+    mesh->getNodePtr(edge_nodes[1])->getCoord(Xb.data(),dim);  //coords node2 of current edge
+    h = (Xa-Xb).norm();  //cout << h << "     " << edge_nodes.transpose() << "     ";
+
+    mesh_sizes[edge_nodes[0]] = (mesh_sizes[edge_nodes[0]]*counter[edge_nodes[0]] + h)/(counter[edge_nodes[0]] + 1.0);  //cout << mesh_sizes[edge_nodes[0]] << "  ";
+    mesh_sizes[edge_nodes[1]] = (mesh_sizes[edge_nodes[1]]*counter[edge_nodes[1]] + h)/(counter[edge_nodes[1]] + 1.0);  //cout << mesh_sizes[edge_nodes[1]] << endl;
+
+    ++counter[edge_nodes[0]];
+    ++counter[edge_nodes[1]];
+  } // end n_edges_total //cout << mesh_sizes[2] << " " << mesh_sizes[3] << endl;
+
+  PetscFunctionReturn(0);
+}
+
+PetscErrorCode AppCtx::orthogTest(Vec const& Vec_0, Vec const& Vec_1)
+{
+  int         tag;
+  VectorXi    node_dofs_mesh(dim);
+  Vector      X0(dim);
+  Vector      X1(dim);
+
+  point_iterator point = mesh->pointBegin();
+  point_iterator point_end = mesh->pointEnd();
+  for (; point != point_end; ++point)  //to calculate Vec_v_mid at each point (initial guess)
+  {
+    tag = point->getTag();
+    if (is_in(tag,slipvel_tags)){
+      getNodeDofs(&*point, DH_MESH, VAR_M, node_dofs_mesh.data());
+      VecGetValues(Vec_0,dim,node_dofs_mesh.data(),X0.data());
+      VecGetValues(Vec_1,dim,node_dofs_mesh.data(),X1.data());
+      cout << mesh->getPointId(&*point) << " " << X0.dot(X1) << "; ";
+    }
+  }
   PetscFunctionReturn(0);
 }

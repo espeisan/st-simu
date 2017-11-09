@@ -11,6 +11,9 @@
 #include <tr1/memory>
 #include <tr1/array>
 #include "mypetsc.hpp"
+#include <sys/types.h>  //for mkdir
+#include <sys/stat.h>   //for check mkdir
+#include <unistd.h>     //for mkdir
 
 using namespace std;
 using namespace Eigen;
@@ -137,10 +140,17 @@ Vector SlipVel(Vector const& X, Vector const& XG, Vector const& normal, int dim,
 double Dif_coeff(int tag);
 double nuB_coeff(int tag);
 double sig_coeff(int tag);
-double bbG_coeff(int tag);
+double bbG_coeff(Vector const& X, int tag);
 
 Vector traction_maxwell(Vector const& E, Vector const& normal, double eps, int tag);
 double per_Elect(int tag);
+
+Vector exact_tangent_ellipse(Vector const& X, Vector const& Xc, double theta, double R1, double R2, int dim);
+Vector exact_normal_ellipse(Vector const& X, Vector const& Xc, double theta, double R1, double R2, int dim);
+Vector cubic_ellipse(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim);
+Vector Dcubic_ellipse(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim);
+Vector curved_Phi(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim);
+Vector Dcurved_Phi(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim);
 
 inline double sqr(double v) {return v*v;}
 
@@ -500,6 +510,7 @@ public:
   int         mesh_cell_type;   // ECellType
   int         function_space;  // P1P1, P2P1, P2P0, etc ...
   int         behaviors;
+  int         n_modes;
   //double      Re;
   PetscBool   has_convec;
   PetscBool   unsteady;
@@ -509,13 +520,13 @@ public:
   PetscBool   force_dirichlet;
   PetscBool   full_diriclet;
   PetscBool   force_mesh_velocity;
-  PetscBool   is_sslv;
   PetscBool   ale;
   PetscBool   plot_exact_sol;
   PetscBool   family_files;
   PetscBool   fprint_ca, fprint_hgv; // print contact angle, gravity velocity solid
   PetscBool   nonlinear_elasticity;
   PetscBool   mesh_adapt;
+  PetscBool   time_adapt;
   PetscBool   is_mr_ab;
   PetscBool   is_bdf3;
   PetscBool   is_bdf2;
@@ -526,6 +537,10 @@ public:
   PetscBool   is_bdf_extrap_cte;
   PetscBool   is_basic;
   PetscBool   is_slipv;
+  PetscBool   is_sslv;
+  PetscBool   is_sfip;
+  PetscBool   is_sfim;
+  PetscBool   is_curvt;
   
   int         converged_times;
   double      dt;
@@ -701,32 +716,36 @@ public:
   // mesh size control ... mesh_size[i] is the mean of edge's size connected to node i at TIME=0
   std::vector<Real>    mesh_sizes;
 
-  // petsc vectors
-  Vec                 Vec_uzp_0, Vec_uzp_1, Vec_duzp, Vec_res_fs, Vec_normal;//, Vec_res, Vec_up_0, Vec_up_1,Vec_dup, /**/;
-  Vec                 Vec_duzp_0, Vec_uzp_m1, Vec_uzp_m2; // for bdf3
+  // fluid
+  Vec                 Vec_res_fs, Vec_uzp_0, Vec_uzp_1;//, Vec_res, Vec_up_0, Vec_up_1,Vec_dup, /**/;
+  Vec                 Vec_uzp_m1, Vec_uzp_m2; // for bdf3  //Vec_duzp_0, Vec_duzp,
   Mat                 Mat_Jac_fs;//, Mat_Jac;
   SNES                snes_fs;//, snes;         /* nonlinear solver context */
   KSP    			  ksp_fs;//ksp,
   PC	   			  pc_fs;//pc,
+  SNESLineSearch      linesearch;
 
   // mesh
+  Vec                 Vec_res_m,  Vec_v_mid, Vec_v_1, Vec_x_0, Vec_x_1, Vec_normal, Vec_tangent;
+  Vec                 Vec_x_aux, Vec_x_cur; // bdf3
   Mat                 Mat_Jac_m;
   SNES                snes_m;
   KSP    			  ksp_m;
   PC	   			  pc_m;
-  Vec                 Vec_res_m, Vec_x_0, Vec_x_1, Vec_v_mid, Vec_v_1;
-  Vec                 Vec_x_aux, Vec_x_cur; // bdf3
-  SNESLineSearch      linesearch;
   
   // slip velocity
-  Vec                 Vec_slipv_0, Vec_slipv_1, Vec_slipv_m1, Vec_slipv_m2;
-  Vec                 Vec_uzp_0_ns, Vec_uzp_1_ns, Vec_slip_rho;
+  Vec                 Vec_slipv_0, Vec_slipv_1, Vec_slipv_m1, Vec_slipv_m2, Vec_normal_aux;
+
+  // swimmer
+  Vec                 Vec_res_s, Vec_slip_rho, Vec_rho_aux;  //Vec_uzp_0_ns, Vec_uzp_1_ns,;
   Mat                 Mat_Jac_s;
   SNES                snes_s;
   KSP                 ksp_s;
   PC                  pc_s;
-  Vec                 Vec_res_s;
   SNESLineSearch      linesearch_s;
+
+  //time adaptation
+  Vec                 Vec_uzp_time_aux, Vec_x_time_aux;
 
   // For Luzia's methods
   double h_star, Q_star, beta_l, L_min, L_max, L_range, L_low, L_sup;
@@ -738,9 +757,14 @@ public:
   double TOLad;
   double quality_f(Vector a_coord, Vector b_coord);
   double sizeField_s(Vector coords);
+
+
   PetscErrorCode meshAdapt_s();
   void smoothsMesh_s(Vec &Vec_normal_, Vec &Vec_x_);
-  PetscErrorCode calcSlipVelocity(Vec& Vec_slipv);
+  PetscErrorCode calcSlipVelocity(Vec const& Vec_x_1, Vec& Vec_slipv);
+  PetscErrorCode getMeshSizes();
+  PetscErrorCode orthogTest(Vec const& Vec_0, Vec const& Vec_1);
+  PetscErrorCode timeAdapt();
 
   Vector3d Vsol, Wsol;
 
