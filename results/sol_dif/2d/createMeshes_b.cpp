@@ -20,7 +20,7 @@ int main()
 	double coord[N][2]; 			// Coordenadas centrais das bolhas
 	double *ri = new double[N];   //Raio de cada bolha menor
 	double *rI = new double[N];   //Raio mayor
-	double ri_min = 0.12, ri_max = 0.12; // L_min =1.2, L_max = 2;  //
+	double ri_min = 1.2, ri_max = 1.2; // L_min =1.2, L_max = 2;  //
 	double rI_min = 1.2, rI_max = 1.2;
     int    FS = 101;                  //physical fsi starting tag
 	double rho = 1.5;

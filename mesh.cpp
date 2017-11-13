@@ -365,9 +365,9 @@ void AppCtx::getVecNormals(Vec const* Vec_x_1, Vec & Vec_normal_)
     {
       normal(0) = x_coefs_trans(1,1)-x_coefs_trans(1,0);
       normal(1) = x_coefs_trans(0,0)-x_coefs_trans(0,1);
-      normal /= (x_coefs_trans.col(0)-x_coefs_trans.col(1)).squaredNorm();//consistent normal
-      //normal.normalize();                                                   //mass conserving normal
-      //normal *= ((x_coefs_trans.col(0)-x_coefs_trans.col(1)).norm());     //mass conserving normal
+      //normal /= (x_coefs_trans.col(0)-x_coefs_trans.col(1)).squaredNorm();//consistent normal
+      normal.normalize();                                                   //mass conserving normal
+      normal *= ((x_coefs_trans.col(0)-x_coefs_trans.col(1)).norm());     //mass conserving normal
       normal *= sign_;
       if (contrib_0) //contribution to node a
         VecSetValues(Vec_normal_, dim, map.data()+0*dim, normal.data(), ADD_VALUES); //map.data(): pointer to position 0,

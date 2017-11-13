@@ -2005,8 +2005,9 @@ PetscErrorCode AppCtx::solveTimeProblem()
     getSolidInertiaTensor();
   }
   cout << endl;
+  cout.precision(15);
   for (int K = 0; K < N_Solids; K++){
-    cout << VV[K] <<  ",   " << XG_0[K].transpose() << endl;
+    cout << VV[K] <<  ";   " << XG_0[K].transpose() << endl;
     cout << InTen[K] << endl;
   }
   cout << endl;
@@ -2999,13 +3000,16 @@ void AppCtx::getSolidVolume()
   {
   MatrixXd            x_coefs_c(nodes_per_cell, dim);
   MatrixXd            x_coefs_c_trans(dim, nodes_per_cell);
-  Tensor              F_c(dim,dim), F_c_curv(dim,dim);
-  VectorXi            cell_nodes(nodes_per_cell), cell_nodes_tmp(nodes_per_cell);
-  double              Jx;
-  int                 tag, nod_id, tag_pt0, tag_pt1, tag_pt2, bcell;
+  Tensor              F_c(dim,dim);
+  VectorXi            cell_nodes(nodes_per_cell);
+  double              Jx; //tvol;
+  int                 tag, nod_id;
   Vector              Xqp(dim), Xqp3(Vector::Zero(3));
+  VectorXi            cell_nodes_tmp(nodes_per_cell);
+  Tensor              F_c_curv(dim,dim);
+  int                 tag_pt0, tag_pt1, tag_pt2, bcell;
   double const*       Xqpb;  //coordonates at the master element \hat{X}
-  Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3);
+  Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3), Vdat(3);
   bool                curvf;
 
   const int tid = omp_get_thread_num();
@@ -3026,7 +3030,7 @@ void AppCtx::getSolidVolume()
       bcell = is_in(tag_pt0,solidonly_tags)
              +is_in(tag_pt1,solidonly_tags)
              +is_in(tag_pt2,solidonly_tags);  //test if the cell is acceptable (one curved side)
-      curvf = bcell==1 && is_curvt && false;
+      curvf = bcell==1 && is_curvt;
       if (curvf){
         while (!is_in(tag_pt1, solidonly_tags)){
           cell_nodes_tmp = cell_nodes;
@@ -3047,27 +3051,38 @@ void AppCtx::getSolidVolume()
       if (curvf){
         X0(0) = x_coefs_c_trans(0,0);  X0(1) = x_coefs_c_trans(1,0);
         X2(0) = x_coefs_c_trans(0,2);  X2(1) = x_coefs_c_trans(1,2);
-        Xc << 8.0, 8.0, 0.0; //cout << cell_nodes.transpose() << endl << x_coefs_c_trans << endl << endl;
-        T0 = exact_tangent_ellipse(X0,Xc,0.0,1.20,0.12,dim);  //cout << T0.transpose() << endl;
-        T2 = exact_tangent_ellipse(X2,Xc,0.0,1.20,0.12,dim);  //cout << T2.transpose() << endl;
+        Xc << 8.0, 8.0, 0.0; //cout << cell_nodes.transpose() << endl << x_coefs_c << endl << endl;
+        T0 = exact_tangent_ellipse(X0,Xc,0.0,1.20,1.2,dim);  //cout << X0.transpose() << endl;
+        T2 = exact_tangent_ellipse(X2,Xc,0.0,1.20,1.2,dim);  //cout << X2.transpose() << endl;
+        Vdat << 1.20, 1.20, 0.0;
       }
-
+      //tvol = 0.0;
       for (int qp = 0; qp < n_qpts_err; ++qp)
       {
-        if (curvf){
+        if (curvf){//F_c_curv.setZero();
           Xqpb = quadr_err->point(qp);  //cout << Xqpb[0] << "   " << Xqpb[1] << endl;
-          Phi = curved_Phi(Xqpb[1],X0,X2,T0,T2,dim);
-          DPhi = Dcurved_Phi(Xqpb[1],X0,X2,T0,T2,dim);
+          Phi = curved_Phi(Xqpb[1],X0,X2,Xc,Vdat,dim); //curved_Phi(Xqpb[1],X0,X2,-T0,-T2,dim);
+          //cout << Phi.transpose() << endl;
+          //cout << exact_ellipse(Xqpb[1],X0,X2,Xc,0.0,1.2,1.2,dim).transpose() << endl;
+          //cout << ((1-Xqpb[0]-Xqpb[1])*x_coefs_c_trans.col(0) + Xqpb[0]*x_coefs_c_trans.col(1)
+          //        + Xqpb[1]*x_coefs_c_trans.col(2) + (1-Xqpb[0]-Xqpb[1])*Phi).transpose() << endl;
+          //cout << ((1-Xqpb[0]-Xqpb[1])*x_coefs_c_trans.col(0) + Xqpb[0]*x_coefs_c_trans.col(1)
+          //          + Xqpb[1]*x_coefs_c_trans.col(2)).transpose() << endl;
+          DPhi = Dcurved_Phi(Xqpb[1],X0,X2,Xc,Vdat,dim);
+          //cout << DPhi.transpose() << endl;
           F_c_curv.col(0) = -Phi;
           F_c_curv.col(1) = -Phi + (1.0-Xqpb[0]-Xqpb[1])*DPhi;
+          //cout << F_c_curv << endl;
         }
 
-        F_c    = x_coefs_c_trans * dLqsi_err[qp] + curvf*F_c_curv;
+        F_c    = x_coefs_c_trans * dLqsi_err[qp] + curvf*F_c_curv;  //cout << dLqsi_err[qp];
         Jx     = F_c.determinant();
         VV[nod_id-1] += Jx * quadr_err->weight(qp);
+        //tvol = tvol + Jx * quadr_err->weight(qp);
       } // fim quadratura
+      //cout << mesh->getCellId(&*cell) << "   " << tvol << endl;
     }
-  }  cout << endl << endl; // end elementos
+  } //cout << "area difference = " << abs(VV[0]-3.141592654*1.2*1.2) << endl << endl; // end elementos
   }
 }
 
@@ -3087,6 +3102,12 @@ void AppCtx::getSolidCentroid()
   double              Jx;
   int                 tag, nod_id;
   Vector              Xqp(dim), Xqp3(Vector::Zero(3));
+  VectorXi            cell_nodes_tmp(nodes_per_cell);
+  Tensor              F_c_curv(dim,dim);
+  int                 tag_pt0, tag_pt1, tag_pt2, bcell;
+  double const*       Xqpb;  //coordonates at the master element \hat{X}
+  Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3), Vdat(3);
+  bool                curvf;
 
   const int tid = omp_get_thread_num();
   const int nthreads = omp_get_num_threads();
@@ -3098,12 +3119,52 @@ void AppCtx::getSolidCentroid()
     nod_id = is_in_id(tag, solidonly_tags);
     if (nod_id){
       mesh->getCellNodesId(&*cell, cell_nodes.data());
+
+      //find good orientation for nodes in case of curved border element
+      tag_pt0 = mesh->getNodePtr(cell_nodes(0))->getTag();
+      tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
+      tag_pt2 = mesh->getNodePtr(cell_nodes(2))->getTag();
+      bcell = is_in(tag_pt0,solidonly_tags)
+             +is_in(tag_pt1,solidonly_tags)
+             +is_in(tag_pt2,solidonly_tags);  //test if the cell is acceptable (one curved side)
+      curvf = bcell==1 && is_curvt;
+      if (curvf){
+        while (!is_in(tag_pt1, solidonly_tags)){
+          cell_nodes_tmp = cell_nodes;
+          cell_nodes(0) = cell_nodes_tmp(1);
+          cell_nodes(1) = cell_nodes_tmp(2);
+          cell_nodes(2) = cell_nodes_tmp(0);
+          // TODO if P2/P1
+          //cell_nodes(3) = cell_nodes_tmp(4);
+          //cell_nodes(4) = cell_nodes_tmp(5);
+          //cell_nodes(5) = cell_nodes_tmp(3);
+          tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
+        }
+      }
+
       mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
       x_coefs_c_trans = x_coefs_c.transpose();
 
+      if (curvf){
+        X0(0) = x_coefs_c_trans(0,0);  X0(1) = x_coefs_c_trans(1,0);
+        X2(0) = x_coefs_c_trans(0,2);  X2(1) = x_coefs_c_trans(1,2);
+        Xc << 8.0, 8.0, 0.0; //cout << cell_nodes.transpose() << endl << x_coefs_c << endl << endl;
+        T0 = exact_tangent_ellipse(X0,Xc,0.0,1.20,1.2,dim);  //cout << X0.transpose() << endl;
+        T2 = exact_tangent_ellipse(X2,Xc,0.0,1.20,1.2,dim);  //cout << X2.transpose() << endl;
+        Vdat << 1.20, 1.20, 0.0;
+      }
+
       for (int qp = 0; qp < n_qpts_err; ++qp)
       {
-        F_c    = x_coefs_c_trans * dLqsi_err[qp];
+        if (curvf){
+          Xqpb = quadr_err->point(qp);  //cout << Xqpb[0] << "   " << Xqpb[1] << endl;
+          Phi = curved_Phi(Xqpb[1],X0,X2,Xc,Vdat,dim); //curved_Phi(Xqpb[1],X0,X2,-T0,-T2,dim);
+          DPhi = Dcurved_Phi(Xqpb[1],X0,X2,Xc,Vdat,dim);
+          F_c_curv.col(0) = -Phi;
+          F_c_curv.col(1) = -Phi + (1.0-Xqpb[0]-Xqpb[1])*DPhi;
+        }
+
+        F_c    = x_coefs_c_trans * dLqsi_err[qp] + curvf*F_c_curv;
         Jx     = F_c.determinant();
         Xqp     = x_coefs_c_trans * qsi_err[qp];
         Xqp3(0) = Xqp(0); Xqp3(1) = Xqp(1); if (dim == 3) Xqp3(2) = Xqp(2);
@@ -3543,6 +3604,12 @@ void AppCtx::getSolidInertiaTensor()
   double              Jx, rho;
   int                 tag, nod_id, delta_ij;
   Vector              Xqp(dim), Xqp3(Vector::Zero(3));
+  VectorXi            cell_nodes_tmp(nodes_per_cell);
+  Tensor              F_c_curv(dim,dim);
+  int                 tag_pt0, tag_pt1, tag_pt2, bcell;
+  double const*       Xqpb;  //coordonates at the master element \hat{X}
+  Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3), Vdat(3);
+  bool                curvf;
 
   const int tid = omp_get_thread_num();
   const int nthreads = omp_get_num_threads();
@@ -3554,13 +3621,53 @@ void AppCtx::getSolidInertiaTensor()
     nod_id = is_in_id(tag, solidonly_tags);
     if (nod_id){
       mesh->getCellNodesId(&*cell, cell_nodes.data());
+
+      //find good orientation for nodes in case of curved border element
+      tag_pt0 = mesh->getNodePtr(cell_nodes(0))->getTag();
+      tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
+      tag_pt2 = mesh->getNodePtr(cell_nodes(2))->getTag();
+      bcell = is_in(tag_pt0,solidonly_tags)
+             +is_in(tag_pt1,solidonly_tags)
+             +is_in(tag_pt2,solidonly_tags);  //test if the cell is acceptable (one curved side)
+      curvf = bcell==1 && is_curvt;
+      if (curvf){
+        while (!is_in(tag_pt1, solidonly_tags)){
+          cell_nodes_tmp = cell_nodes;
+          cell_nodes(0) = cell_nodes_tmp(1);
+          cell_nodes(1) = cell_nodes_tmp(2);
+          cell_nodes(2) = cell_nodes_tmp(0);
+          // TODO if P2/P1
+          //cell_nodes(3) = cell_nodes_tmp(4);
+          //cell_nodes(4) = cell_nodes_tmp(5);
+          //cell_nodes(5) = cell_nodes_tmp(3);
+          tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
+        }
+      }
+
       mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
       x_coefs_c_trans = x_coefs_c.transpose();
       rho = MV[nod_id-1]/VV[nod_id-1];
 
+      if (curvf){
+        X0(0) = x_coefs_c_trans(0,0);  X0(1) = x_coefs_c_trans(1,0);
+        X2(0) = x_coefs_c_trans(0,2);  X2(1) = x_coefs_c_trans(1,2);
+        Xc << 8.0, 8.0, 0.0; //cout << cell_nodes.transpose() << endl << x_coefs_c << endl << endl;
+        T0 = exact_tangent_ellipse(X0,Xc,0.0,1.20,1.2,dim);  //cout << X0.transpose() << endl;
+        T2 = exact_tangent_ellipse(X2,Xc,0.0,1.20,1.2,dim);  //cout << X2.transpose() << endl;
+        Vdat << 1.20, 1.20, 0.0;
+      }
+
       for (int qp = 0; qp < n_qpts_err; ++qp)
       {
-        F_c     = x_coefs_c_trans * dLqsi_err[qp];
+        if (curvf){
+          Xqpb = quadr_err->point(qp);  //cout << Xqpb[0] << "   " << Xqpb[1] << endl;
+          Phi = curved_Phi(Xqpb[1],X0,X2,Xc,Vdat,dim); //curved_Phi(Xqpb[1],X0,X2,-T0,-T2,dim);
+          DPhi = Dcurved_Phi(Xqpb[1],X0,X2,Xc,Vdat,dim);
+          F_c_curv.col(0) = -Phi;
+          F_c_curv.col(1) = -Phi + (1.0-Xqpb[0]-Xqpb[1])*DPhi;
+        }
+
+        F_c     = x_coefs_c_trans * dLqsi_err[qp] + curvf*F_c_curv;
         Jx      = F_c.determinant();
         Xqp     = x_coefs_c_trans * qsi_err[qp];
         Xqp3(0) = Xqp(0); Xqp3(1) = Xqp(1); if (dim == 3) Xqp3(2) = Xqp(2);
@@ -3853,7 +3960,7 @@ else if(true){// discretization of surface gradient over the edges
     is_fsi     = is_in(tag, flusoli_tags);
     is_slv     = is_in(tag, slipvel_tags);
 
-    if ( !(is_fsi || is_slv) )// not using is_fsi unconsider the both edges contribution to the tangent
+    if ( !(is_fsi || is_slv) )// not using is_fsi disconsider the both edges contribution to the tangent
       continue;
 
     dof_handler[DH_MESH].getVariable(VAR_M).getFacetDofs(map.data(), &*facet);

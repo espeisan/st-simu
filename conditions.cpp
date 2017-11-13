@@ -59,6 +59,12 @@ Vector Dcubic_ellipse(double yb, Vector const& X0, Vector const& X2, Vector cons
 Vector curved_Phi(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim);
 Vector Dcurved_Phi(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim);
 
+double atan2PI(double a, double b);
+Vector exact_ellipse(double yb, Vector const& X0, Vector const& X2,
+                     Vector const& Xc, double theta, double R1, double R2, int dim);
+Vector Dexact_ellipse(double yb, Vector const& X0, Vector const& X2,
+                     Vector const& Xc, double theta, double R1, double R2, int dim);
+
 // gota estática 2d/////////////////////////////////////////////////////////////
 #if (false)
 
@@ -2333,22 +2339,134 @@ Vector Dcubic_ellipse(double yb, Vector const& X0, Vector const& X2, Vector cons
 Vector curved_Phi(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim)
 {
   Vector Phi(Vector::Zero(dim));
-  if (yb != 1)
-    Phi = (1.0/(1.0-yb))*(cubic_ellipse(yb,X0,X2,T0,T2,dim)+yb*(X0-X2)-X0);
-  else
-    Phi = -Dcubic_ellipse(1.0,X0,X2,T0,T2,dim)-X0+X2;
-
+  if (false){
+    if (yb != 1){
+      Phi = (1.0/(1.0-yb))*(cubic_ellipse(yb,X0,X2,T0,T2,dim)+yb*(X0-X2)-X0);}
+    else{
+      Phi = -Dcubic_ellipse(1.0,X0,X2,T0,T2,dim)-X0+X2;}
+  }
+  else{//using T0 as Xc and T2 as a container for R1,R2 and theta
+    Vector Xc = T0;
+    double R1 = T2(0), R2 = T2(1), theta = T2(2);  //cout << Xc.transpose() << "   " << R1 << "   " << R2 << "   " << theta << endl;
+    if (yb != 1){
+      Phi = (1.0/(1.0-yb))*(exact_ellipse(yb,X0,X2,Xc,theta,R1,R2,dim)+yb*(X0-X2)-X0);}
+    else{
+      Phi = -Dexact_ellipse(1.0,X0,X2,Xc,theta,R1,R2,dim)-X0+X2;}
+  }
   return Phi;
 }
 
 Vector Dcurved_Phi(double yb, Vector const& X0, Vector const& X2, Vector const& T0, Vector const& T2, int dim)
 {
   Vector DPhi(Vector::Zero(dim));
-  if (yb != 1){
-    DPhi = (1.0/((1.0-yb)*(1.0-yb)))*((Dcubic_ellipse(yb,X0,X2,T0,T2,dim)+X0-X2)*(1-yb)
-           +cubic_ellipse(yb,X0,X2,T0,T2,dim)+yb*(X0-X2)-X0);}
-  else
-    {DPhi = -Dcubic_ellipse(1.0,X0,X2,T0,T2,dim)-X0+X2;}
+  if (false){
+    if (yb != 1){
+      DPhi = (1.0/((1.0-yb)*(1.0-yb)))*((Dcubic_ellipse(yb,X0,X2,T0,T2,dim)+X0-X2)*(1-yb)
+             +cubic_ellipse(yb,X0,X2,T0,T2,dim)+yb*(X0-X2)-X0);}
+    else{
+      DPhi = -Dcubic_ellipse(1.0,X0,X2,T0,T2,dim)-X0+X2;}
+  }
+  else{//using T0 as Xc and T2 as a container for R1,R2 and theta
+    Vector Xc = T0;
+    double R1 = T2(0), R2 = T2(1), theta = T2(2);
+    if (yb != 1){
+      DPhi = (1.0/((1.0-yb)*(1.0-yb)))*((1-yb)*(Dexact_ellipse(yb,X0,X2,Xc,theta,R1,R2,dim)+X0-X2)
+             +exact_ellipse(yb,X0,X2,Xc,theta,R1,R2,dim)+yb*(X0-X2)-X0);}
+    else{
+      DPhi = -Dexact_ellipse(1.0,X0,X2,Xc,theta,R1,R2,dim)-X0+X2; cout << "what?" << endl;}
+    Vector tmp(2); tmp << 8,8;
+    //cout << (exact_ellipse(yb,X0,X2,Xc,theta,R1,R2,dim)-tmp).dot(Dexact_ellipse(yb,X0,X2,Xc,theta,R1,R2,dim)) << endl;
+  }
 
   return DPhi;
+}
+
+double atan2PI(double a, double b)
+{
+  if (b == 0)
+    if (a > 0)
+      return pi/2.0;
+    else
+      return 3.0*pi/2.0;
+
+  double s = atan(a/b);
+  if (a >= 0 && b > 0)
+    s = s + 0.0;
+  else if (b < 0)
+    s = s + pi;
+  else if (a < 0 && b > 0)
+    s = s + 2*pi;
+  else
+    throw;
+
+  return s;
+}
+
+Vector exact_ellipse(double yb, Vector const& X0, Vector const& X2,
+                     Vector const& Xc, double theta, double R1, double R2, int dim)
+                     //Vector &Phib, Vector &DPhib)
+{
+  Vector Phib(Vector::Zero(dim));
+  //Vector DPhib(Vector::Zero(dim));
+  Vector Xcan0(Vector::Zero(3));
+  Vector Xcan2(Vector::Zero(3));
+  Vector X30(Vector::Zero(3));
+  Vector X32(Vector::Zero(3));
+  X30(0) = X0(0); X30(1) = X0(1);
+  X32(0) = X2(0); X32(1) = X2(1);
+
+  Xcan0 = RotM(-theta,dim)*X30-Xc;
+  Xcan2 = RotM(-theta,dim)*X32-Xc;  //cout << endl << "Can Coords: " << Xcan0.transpose() << "   " << Xcan2.transpose();
+
+  double s0 = atan2PI(R1*Xcan0(1),R2*Xcan0(0));
+  double s2 = atan2PI(R1*Xcan2(1),R2*Xcan2(0));
+  if (s0 < pi/2.0 && s2 > 3*pi/2.0){s0 = s0 + 2*pi;}
+  else if (s2 < pi/2.0 && s0 > 3*pi/2.0){s2 = s2 + 2*pi;}
+  double s  = (s2-s0)*yb+s0;  //cout << endl << "Param data:  " << s0 << "   " << s2 << "   " << s << endl;
+
+  X30(0) = R1*cos(s)+Xc(0); X30(1) = R2*sin(s)+Xc(1);  //cout << X30.transpose() << endl;
+  X30 = RotM(theta,dim)*X30;  //cout << X30.transpose() << endl;
+  Phib(0) = X30(0); Phib(1) = X30(1);  //cout << Phib.transpose() << endl;
+
+  //X30(0) = -R1*sin(s); X30(1) = R2*cos(s);
+  //X30 = (s2-s0)*RotM(theta,dim)*X30;
+
+  //DPhib(0) = X30(0); DPhib(1) = X30(1);
+
+  return Phib;
+}
+
+Vector Dexact_ellipse(double yb, Vector const& X0, Vector const& X2,
+                     Vector const& Xc, double theta, double R1, double R2, int dim)
+                     //Vector &Phib, Vector &DPhib)
+{
+  //Vector Phib(Vector::Zero(dim));
+  Vector DPhib(Vector::Zero(dim));
+  Vector Xcan0(Vector::Zero(3));
+  Vector Xcan2(Vector::Zero(3));
+  Vector X30(Vector::Zero(3));
+  Vector X32(Vector::Zero(3));
+  X30(0) = X0(0); X30(1) = X0(1);
+  X32(0) = X2(0); X32(1) = X2(1);
+
+  Xcan0 = RotM(-theta,dim)*X30-Xc;
+  Xcan2 = RotM(-theta,dim)*X32-Xc;
+
+  double s0 = atan2PI(R1*Xcan0(1),R2*Xcan0(0));
+  double s2 = atan2PI(R1*Xcan2(1),R2*Xcan2(0));
+  if (s0 < pi/2.0 && s2 > 3*pi/2.0){s0 = s0 + 2*pi;}
+  else if (s2 < pi/2.0 && s0 > 3*pi/2.0){s2 = s2 + 2*pi;}
+  double s  = (s2-s0)*yb+s0;  //cout << endl << "Param data:  " << s0 << "   " << s2 << "   " << s << endl;
+
+  //X30(0) = R1*cos(s)+Xc(0); X30(1) = R2*sin(s)+Xc(1);
+  //X30 = RotM(theta,dim)*X30;
+
+  //Phib(0) = X30(0); Phib(1) = X30(1);
+
+  X30(0) = -R1*sin(s); X30(1) = R2*cos(s);
+  X30 = (s2-s0)*RotM(theta,dim)*X30;
+
+  DPhib(0) = X30(0); DPhib(1) = X30(1);  //cout << "b." << DPhib.transpose() << endl;
+
+  return DPhib;
 }
