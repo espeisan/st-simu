@@ -557,7 +557,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
   int null_space_press_dof=-1;
 
-  int iter, nodidd;
+  int iter;//, nodidd;
   SNESGetIterationNumber(snes_fs,&iter);  //cout << iter <<endl;
 
   if (!iter)
@@ -796,16 +796,15 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
     VectorXi            cell_nodes_tmp(nodes_per_cell);
     Tensor              F_c_curv(dim,dim);
-    int                 tag_pt0, tag_pt1, tag_pt2, bcell;
+    int                 tag_pt0, tag_pt1, tag_pt2, bcell, nPer;
     double const*       Xqpb;  //coordonates at the master element \hat{X}
     Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xcc(3), Vdat(3);
-    bool                curvf; //
-
+    bool                curvf;
     //Permutation matrices
-    Tensor3i            PerM3(Tensor3::Zero(3,3));
-    Tensor9i            PerM9(Tensor9::Zero(9,9));
+    TensorXi            PerM3(TensorXi::Zero(3,3)), PerM6(TensorXi::Zero(6,6));
     PerM3(0,1) = 1; PerM3(1,2) = 1; PerM3(2,0) = 1;
-    PerM9(0,2) = 1; PerM9(1,3) = 1; PerM9(2,4) = 1; PerM9(3,5) = 1; PerM9(4,0) = 1; PerM9(5,1) = 1;
+    PerM6(0,2) = 1; PerM6(1,3) = 1; PerM6(2,4) = 1; PerM6(3,5) = 1; PerM6(4,0) = 1; PerM6(5,1) = 1;
+    //cout << PerM3 << endl << endl; cout << PerM6 << endl << endl;
 
     const int tid = omp_get_thread_num();
     const int nthreads = omp_get_num_threads();
@@ -834,7 +833,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       }
 
       // get nodal coordinates of the old and new cell
-      mesh->getCellNodesId(&*cell, cell_nodes.data());  cout << cell_nodes.transpose() << endl;
+      mesh->getCellNodesId(&*cell, cell_nodes.data());  //cout << cell_nodes.transpose() << endl;
       //mesh->getNodesCoords(cell_nodes.begin(), cell_nodes.end(), x_coefs_c.data());
       //x_coefs_c_trans = x_coefs_c_mid_trans;
       //find good orientation for nodes in case of curved border element
@@ -844,25 +843,35 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       bcell = is_in(tag_pt0,fluidonly_tags)
              +is_in(tag_pt1,fluidonly_tags)
              +is_in(tag_pt2,fluidonly_tags);  //test if the cell is acceptable (one curved side)
-      curvf = bcell==1 && is_curvt;
+      curvf = bcell==1 && is_curvt;  nPer = 0;
       if (curvf){
         while (!is_in(tag_pt1, fluidonly_tags)){
-          cell_nodes_tmp = cell_nodes;
-          cell_nodes(0) = cell_nodes_tmp(1);
-          cell_nodes(1) = cell_nodes_tmp(2);
-          cell_nodes(2) = cell_nodes_tmp(0);
+          //cell_nodes_tmp = cell_nodes;
+          //cell_nodes(0) = cell_nodes_tmp(1);
+          //cell_nodes(1) = cell_nodes_tmp(2);
+          //cell_nodes(2) = cell_nodes_tmp(0);
           // TODO if P2/P1
           //cell_nodes(3) = cell_nodes_tmp(4);
           //cell_nodes(4) = cell_nodes_tmp(5);
           //cell_nodes(5) = cell_nodes_tmp(3);
+          cell_nodes = PerM3*cell_nodes; nPer++;  //counts how many permutations
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
+        cout << mesh->getCellId(&*cell) << "     " << cell_nodes.transpose() << endl;
       }
 
       // mapeamento do local para o global:
-      dof_handler[DH_MESH].getVariable(VAR_M).getCellDofs(mapM_c.data(), &*cell);  cout << mapM_c.transpose() << endl;  //unk. global ID's
-      dof_handler[DH_UNKM].getVariable(VAR_U).getCellDofs(mapU_c.data(), &*cell);  cout << mapU_c.transpose() << endl;
-      dof_handler[DH_UNKM].getVariable(VAR_P).getCellDofs(mapP_c.data(), &*cell);  cout << mapP_c.transpose() << endl;
+      dof_handler[DH_MESH].getVariable(VAR_M).getCellDofs(mapM_c.data(), &*cell);  //cout << mapM_c.transpose() << endl;  //unk. global ID's
+      dof_handler[DH_UNKM].getVariable(VAR_U).getCellDofs(mapU_c.data(), &*cell);  //cout << mapU_c.transpose() << endl;
+      dof_handler[DH_UNKM].getVariable(VAR_P).getCellDofs(mapP_c.data(), &*cell);  //cout << mapP_c.transpose() << endl;
+
+      if (curvf){
+        for (int l = 0; l < nPer; l++){
+          mapM_c = PerM6*mapM_c;
+          mapU_c = PerM6*mapM_c;
+          mapP_c = PerM3*mapP_c;
+        }
+      }
 
       if (is_sfip){
         mapZ_c = -VectorXi::Ones(nodes_per_cell*LZ);

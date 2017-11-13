@@ -66,8 +66,7 @@ typedef Matrix<double, Dynamic,1,0,6,1>              Vector;  //6 is _MaxRows in
 typedef Matrix<double, Dynamic,Dynamic,RowMajor,3,3> Tensor;
 typedef Matrix<double, 3, 3> Tensor3;
 typedef Matrix<double, Dynamic,Dynamic,RowMajor,6,6> TensorZ;
-typedef Matrix<int, 3, 3> Tensor3i;
-typedef Matrix<int, 9, 9> Tensor9i;
+typedef Matrix<int, Dynamic,Dynamic,RowMajor,6,6> TensorXi;
 
 template<class Vec, class T>
 bool is_in(T value, Vec const& v)

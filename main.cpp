@@ -3005,12 +3005,14 @@ void AppCtx::getSolidVolume()
   double              Jx; //tvol;
   int                 tag, nod_id;
   Vector              Xqp(dim), Xqp3(Vector::Zero(3));
-  VectorXi            cell_nodes_tmp(nodes_per_cell);
+//  VectorXi            cell_nodes_tmp(nodes_per_cell);
   Tensor              F_c_curv(dim,dim);
   int                 tag_pt0, tag_pt1, tag_pt2, bcell;
   double const*       Xqpb;  //coordonates at the master element \hat{X}
   Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3), Vdat(3);
   bool                curvf;
+  TensorXi            PerM3(TensorXi::Zero(3,3));  //Permutation matrix
+  PerM3(0,1) = 1; PerM3(1,2) = 1; PerM3(2,0) = 1;
 
   const int tid = omp_get_thread_num();
   const int nthreads = omp_get_num_threads();
@@ -3033,14 +3035,15 @@ void AppCtx::getSolidVolume()
       curvf = bcell==1 && is_curvt;
       if (curvf){
         while (!is_in(tag_pt1, solidonly_tags)){
-          cell_nodes_tmp = cell_nodes;
-          cell_nodes(0) = cell_nodes_tmp(1);
-          cell_nodes(1) = cell_nodes_tmp(2);
-          cell_nodes(2) = cell_nodes_tmp(0);
+          //cell_nodes_tmp = cell_nodes;
+          //cell_nodes(0) = cell_nodes_tmp(1);
+          //cell_nodes(1) = cell_nodes_tmp(2);
+          //cell_nodes(2) = cell_nodes_tmp(0);
           // TODO if P2/P1
           //cell_nodes(3) = cell_nodes_tmp(4);
           //cell_nodes(4) = cell_nodes_tmp(5);
           //cell_nodes(5) = cell_nodes_tmp(3);
+          cell_nodes = PerM3*cell_nodes;
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
       }
@@ -3102,12 +3105,14 @@ void AppCtx::getSolidCentroid()
   double              Jx;
   int                 tag, nod_id;
   Vector              Xqp(dim), Xqp3(Vector::Zero(3));
-  VectorXi            cell_nodes_tmp(nodes_per_cell);
+//  VectorXi            cell_nodes_tmp(nodes_per_cell);
   Tensor              F_c_curv(dim,dim);
   int                 tag_pt0, tag_pt1, tag_pt2, bcell;
   double const*       Xqpb;  //coordonates at the master element \hat{X}
   Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3), Vdat(3);
   bool                curvf;
+  TensorXi            PerM3(TensorXi::Zero(3,3));  //Permutation matrix
+  PerM3(0,1) = 1; PerM3(1,2) = 1; PerM3(2,0) = 1;
 
   const int tid = omp_get_thread_num();
   const int nthreads = omp_get_num_threads();
@@ -3130,14 +3135,15 @@ void AppCtx::getSolidCentroid()
       curvf = bcell==1 && is_curvt;
       if (curvf){
         while (!is_in(tag_pt1, solidonly_tags)){
-          cell_nodes_tmp = cell_nodes;
-          cell_nodes(0) = cell_nodes_tmp(1);
-          cell_nodes(1) = cell_nodes_tmp(2);
-          cell_nodes(2) = cell_nodes_tmp(0);
+          //cell_nodes_tmp = cell_nodes;
+          //cell_nodes(0) = cell_nodes_tmp(1);
+          //cell_nodes(1) = cell_nodes_tmp(2);
+          //cell_nodes(2) = cell_nodes_tmp(0);
           // TODO if P2/P1
           //cell_nodes(3) = cell_nodes_tmp(4);
           //cell_nodes(4) = cell_nodes_tmp(5);
           //cell_nodes(5) = cell_nodes_tmp(3);
+          cell_nodes = PerM3*cell_nodes;
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
       }
@@ -3610,6 +3616,8 @@ void AppCtx::getSolidInertiaTensor()
   double const*       Xqpb;  //coordonates at the master element \hat{X}
   Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xc(3), Vdat(3);
   bool                curvf;
+  TensorXi            PerM3(TensorXi::Zero(3,3));  //Permutation matrix
+  PerM3(0,1) = 1; PerM3(1,2) = 1; PerM3(2,0) = 1;
 
   const int tid = omp_get_thread_num();
   const int nthreads = omp_get_num_threads();
@@ -3632,14 +3640,15 @@ void AppCtx::getSolidInertiaTensor()
       curvf = bcell==1 && is_curvt;
       if (curvf){
         while (!is_in(tag_pt1, solidonly_tags)){
-          cell_nodes_tmp = cell_nodes;
-          cell_nodes(0) = cell_nodes_tmp(1);
-          cell_nodes(1) = cell_nodes_tmp(2);
-          cell_nodes(2) = cell_nodes_tmp(0);
+          //cell_nodes_tmp = cell_nodes;
+          //cell_nodes(0) = cell_nodes_tmp(1);
+          //cell_nodes(1) = cell_nodes_tmp(2);
+          //cell_nodes(2) = cell_nodes_tmp(0);
           // TODO if P2/P1
           //cell_nodes(3) = cell_nodes_tmp(4);
           //cell_nodes(4) = cell_nodes_tmp(5);
           //cell_nodes(5) = cell_nodes_tmp(3);
+          cell_nodes = PerM3*cell_nodes;
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
       }
