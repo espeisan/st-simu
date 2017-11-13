@@ -799,7 +799,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
     int                 tag_pt0, tag_pt1, tag_pt2, bcell;
     double const*       Xqpb;  //coordonates at the master element \hat{X}
     Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xcc(3), Vdat(3);
-    bool                curvf;
+    bool                curvf; //
 
     //Permutation matrices
     Tensor3i            PerM3(Tensor3::Zero(3,3));
