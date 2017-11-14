@@ -796,7 +796,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
     VectorXi            cell_nodes_tmp(nodes_per_cell);
     Tensor              F_c_curv(dim,dim);
-    int                 tag_pt0, tag_pt1, tag_pt2, bcell, nPer;
+    int                 tag_pt0, tag_pt1, tag_pt2, bcell, nPer, ccell;
     double const*       Xqpb;  //coordonates at the master element \hat{X}
     Vector              Phi(dim), DPhi(dim), Dphi(dim), X0(dim), X2(dim), T0(dim), T2(dim), Xcc(3), Vdat(3);
     bool                curvf;
@@ -840,10 +840,11 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       tag_pt0 = mesh->getNodePtr(cell_nodes(0))->getTag();
       tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
       tag_pt2 = mesh->getNodePtr(cell_nodes(2))->getTag();
-      bcell = is_in(tag_pt0,fluidonly_tags)
-             +is_in(tag_pt1,fluidonly_tags)
-             +is_in(tag_pt2,fluidonly_tags);  //test if the cell is acceptable (one curved side)
-      curvf = bcell==1 && is_curvt;  nPer = 0;
+      //test if the cell is acceptable (one curved side)
+      bcell = is_in(tag_pt0,fluidonly_tags)+is_in(tag_pt1,fluidonly_tags)+is_in(tag_pt2,fluidonly_tags);
+      ccell = is_in(tag_pt0,flusoli_tags)+is_in(tag_pt1,flusoli_tags)+is_in(tag_pt2,flusoli_tags)
+             +is_in(tag_pt0,slipvel_tags)+is_in(tag_pt1,slipvel_tags)+is_in(tag_pt2,slipvel_tags);
+      curvf = bcell==1 && ccell==2 && is_curvt;  nPer = 0;
       if (curvf){
         while (!is_in(tag_pt1, fluidonly_tags)){
           //cell_nodes_tmp = cell_nodes;
@@ -857,7 +858,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
           cell_nodes = PerM3*cell_nodes; nPer++;  //counts how many permutations
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
-        cout << mesh->getCellId(&*cell) << "     " << cell_nodes.transpose() << endl;
+        //cout << mesh->getCellId(&*cell) << "     " << cell_nodes.transpose() << endl;
       }
 
       // mapeamento do local para o global:
@@ -867,9 +868,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
       if (curvf){
         for (int l = 0; l < nPer; l++){
-          mapM_c = PerM6*mapM_c;
-          mapU_c = PerM6*mapM_c;
-          mapP_c = PerM3*mapP_c;
+          mapM_c = PerM6*mapM_c;  cout << mapM_c.transpose() << endl;
+          mapU_c = PerM6*mapU_c;  cout << mapU_c.transpose() << endl;
+          mapP_c = PerM3*mapP_c;  cout << mapP_c.transpose() << endl;
         }
       }
 

@@ -3135,14 +3135,6 @@ void AppCtx::getSolidCentroid()
       curvf = bcell==1 && is_curvt;
       if (curvf){
         while (!is_in(tag_pt1, solidonly_tags)){
-          //cell_nodes_tmp = cell_nodes;
-          //cell_nodes(0) = cell_nodes_tmp(1);
-          //cell_nodes(1) = cell_nodes_tmp(2);
-          //cell_nodes(2) = cell_nodes_tmp(0);
-          // TODO if P2/P1
-          //cell_nodes(3) = cell_nodes_tmp(4);
-          //cell_nodes(4) = cell_nodes_tmp(5);
-          //cell_nodes(5) = cell_nodes_tmp(3);
           cell_nodes = PerM3*cell_nodes;
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
