@@ -1,0 +1,294 @@
+-dim 2
+-dt 1e-2
+finaltime 1000
+-maxts 2
+-renumber_dofs 0
+-print_step 1
+-has_convec 0
+-unsteady 0
+-boundary_smoothing 0
+-force_mesh_velocity 1
+-nonlinear_elasticity 0
+-mesh_adapt 0
+-solve_slip_velocity 0
+n_modes 0
+-fprint_ca 0
+beta1 0.0
+beta2 1.0
+-plot_es 1
+-family_files 1
+-sst -1.e-7
+-utheta 1
+vtheta 10000000000000 NOT USED
+-quadr_c 4
+-quadr_f 8
+-quadr_r 2
+-quadr_e 10
+-ale 1
+-force_pressure 0
+-print_to_matlab 1
+-time_adapt 0
+-curved_trian 0
+
+-pc_type ilu lu
+pc_factor_mat_solver_package mumps
+pc_factor_levels 2
+sub_pc_factor_levels 1
+pc_composite_type multiplicative
+pc_composite_pcs ilu,ilu
+-pc_factor_shift_type NONZERO
+-pc_factor_shift_amount 1.e-12
+pc_factor_mat_ordering_type natural
+-pc_factor_reuse_ordering 1
+pc_factor_nonzeros_along_diagonal 1.e-10
+pc_factor_diagonal_fill
+pc_factor_fill 3.22746e-06
+pc_factor_in_place
+
+ksp_type preonly
+ksp_type richardson
+ksp_type chebyshev
+ksp_initial_guess_nonzero 1
+-ksp_gmres_restart 300
+-ksp_rtol 1e-7
+-ksp_monitor stdout
+-ksp_max_it 1000
+-ksp_atol 1e-9
+
+snes_fd 0
+-snes_linesearch_type basic
+snes_type test ksponly
+snes_picard_alpha 1.2
+snes_test_display 1
+snes_monitor_cancel 0
+-snes_monitor stdout
+snes_converged_reason 1
+-snes_stol 1.e-13
+-snes_rtol 1.e-13
+-snes_atol 1.e-13
+-snes_max_it 20
+
+mat_mumps_icntl_7 2
+log_trace stdout
+malloc_debug 1
+mat_no_inode 1
+
+-print_to_matlab 0
+-force_dirichlet 1
+fp_trap 1
+-on_error_abort 1
+
+vec_type seqpthread
+mat_type seqaijpthread
+thread_sync_type LOCKFREE
+vec_threads 3
+mat_threads 3
+use_thread_pool main
+nthreads 3
+
+canal                dir_tags 2,1  neum_tags 3  feature_tags 3
+solid 2d          dir_tags 13  fsi_tags 14  fonly_tags 15,13
+solid 2d 2b   dir_tags 1-5,33  fsi_tags 5  fonly_tags 1-5,100,33
+solid 2d 2b   dir_tags 1-6  fsi_tags 101,201  sonly_tags 102,202  fonly_tags 10  interf_tags 101
+solid 2d 1b   dir_tags 1-6  fsi_tags 101  sonly_tags 102  fonly_tags 10  interf_tags 101
+solid 2d Nb  dir_tags 1-6  fsi_tags 101,201,301,401  fonly_tags 10  sonly_tags 102,202,302,402
+solid 3d 1b   dir_tags 1-9 ,101,102,103 fsi_tags 101  sonly_tags 102  fonly_tags 10  slipv_tags 103
+rotsol 2d 1b   dir_tags 1-6  fonly_tags 10  fsi_tags 101  sonly_tags 102  slipv_tags 103
+rotsol 2d 1b   dir_tags 1  fonly_tags 10  fsi_tags 101  sonly_tags 102
+rotsol 2d 2b   dir_tags 1-6  fonly_tags 10  fsi_tags 101,201  sonly_tags 102,202  slipv_tags 103,203
+rotbur 2d 1d  dir_tags 1  interf_tags 101
+solid 2d 120b  dir_tags 1-6  fsi_tags 101-221  fonly_tags 10  sonly_tags 221-341
+solid 2d 15b  dir_tags 1-6  fonly_tags 10  fsi_tags 101-116  slipv_tags 116-131  sonly_tags 131-146 
+solid 2d 15b  dir_tags 1-6  fonly_tags 10  fsi_tags 101  slipv_tags 116  sonly_tags 131 
+trap 2d 1b  dir_tags 1,2,3,5,10  fsi_tags 6  sonly_tags 8  fonly_tags 7  neum_tags 4
+trap chan 2d 1b  dir_tags 1,2,4  fsi_tags 6  sonly_tags 8  fonly_tags 7  neum_tags 3
+solid 2d 1b  dir_tags 1-5  fonly_tags 10  fsi_tags 101  slipv_tags 102  sonly_tags 103
+solid 2d 2b  dir_tags 1-5  fonly_tags 10  fsi_tags 101,102  slipv_tags 103,104  sonly_tags 105,106
+solid 2d 20b  dir_tags 1-5  fonly_tags 10  fsi_tags 101-121  slipv_tags 121-141  sonly_tags 141-161 
+solid 2d 1b dir_tags 1-5  fonly_tags 10  fsi_tags 101-102  slipv_tags 102-103  sonly_tags 103-104
+channel 2d 1b -dir_tags 2,4,1  -fonly_tags 7  fsi_tags 101-102  slipv_tags 102-103  sonly_tags 103-104  neum_tags 2  -feature_tags 3
+gota_g 2d  dir_tags 13,20  neum_tags  interf_tags 14
+
+Remember change nuB_coeff in conditions.cpp according to tags in args!!!
+
+function_space 1
+function_space 2
+function_space 3
+function_space 4
+function_space 5
+function_space 6
+function_space 7
+function_space 8
+function_space 9
+
+mesh_type 8
+mesh_type 16
+mesh_type 32
+mesh_type 64
+mesh_type 128
+mesh_type 256
+mesh_type 512
+mesh_type 1024
+mesh_type 2048
+mesh_type 4096
+
+fin results/sol_dif/2d/Nsol1.msh
+fout results/sol_dif/2d/Nsol1/Nsol1_.vtk
+min results/sol_dif/2d/Nsol1.txt
+hout results/sol_dif/2d/Nsol1
+
+fin results/sol_asc/2d/120sol1.msh
+fout results/sol_asc/2d/120sol1/120sol1_.vtk
+min results/sol_asc/2d/120sol1.txt
+hout results/sol_asc/2d/120sol1
+
+fin results/sol_asc/2d/15sol1.msh
+fout results/sol_asc/2d/15sol1/15sol1_.vtk
+min results/sol_asc/2d/15sol1.txt
+hout results/sol_asc/2d/15sol1
+
+fin results/sol_asc/2d/Nsol1.msh
+fout results/sol_asc/2d/Nsol1/Nsol1_.vtk
+min results/sol_asc/2d/Nsol1.txt
+hout results/sol_asc/2d/Nsol1
+
+fin results/sol_asc/3d/1sol1.msh
+fout results/sol_asc/3d/1sol1/1sol1_.vtk
+min results/sol_asc/3d/1sol1.txt
+hout results/sol_asc/3d/1sol1
+
+fin results/sol_asc/2d/1sol1_sv.msh
+fout results/sol_asc/2d/1sol1_sv/1sol1_.vtk
+min results/sol_asc/2d/1sol1.txt
+hout results/sol_asc/2d/1sol1_sv
+
+fin results/sol_asc/2d/1sol.msh
+fout results/sol_asc/2d/1sol/1sol_.vtk
+min results/sol_asc/2d/1sol.txt
+hout results/sol_asc/2d/1sol
+
+fin results/rot_cyl/2d/1sol1.msh
+fout results/rot_cyl/2d/1sol1/1sol1_.vtk
+min results/rot_cyl/2d/1sol1.txt
+hout results/rot_cyl/2d/1sol1
+sin results/rot_cyl/2d/ex_sol.txt
+
+fin results/rot_cyl/2d/15sol1.msh
+fout results/rot_cyl/2d/15sol1/15sol1_.vtk
+min results/rot_cyl/2d/15sol1.txt
+hout results/rot_cyl/2d/15sol1
+
+fin results/rot_cyl/2d/2sol1.msh
+fout results/rot_cyl/2d/2sol1/2sol1_.vtk
+min results/rot_cyl/2d/2sol1.txt
+hout results/rot_cyl/2d/2sol1
+
+fin results/rot_cyl/2d/1elip.msh
+fout results/rot_cyl/2d/1elip/1elip_.vtk
+min results/rot_cyl/2d/1sol1.txt
+hout results/rot_cyl/2d/1elip
+
+fin results/sol_asc/2d/2sol1_sv.msh
+fout results/sol_asc/2d/2sol1_sv/2sol1_.vtk
+min results/sol_asc/2d/2sol1.txt
+hout results/sol_asc/2d/2sol1_sv
+
+fin results/trap/trap.msh
+fout results/trap/trap_out/trap_.vtk
+min results/trap/trap.txt
+hout results/trap/trap_out
+
+fin results/trap/channel.msh
+fout results/trap/channel_out_new/channel_.vtk
+min results/trap/channel.txt
+hout results/trap/channel_out_new
+
+fin results/sol_dif/2d/Nsol1.msh
+fout results/sol_dif/2d/Nsol1/Nsol1_.vtk
+min results/sol_dif/2d/Nsol1.txt
+hout results/sol_dif/2d/Nsol1
+
+fin results/sol_dif/2d/Nsol2.msh
+fout results/sol_dif/2d/Nsol2/Nsol2_.vtk
+min results/sol_dif/2d/Nsol2.txt
+hout results/sol_dif/2d/Nsol2
+
+fin results/sol_dif/2d/Nsol15.msh
+fout results/sol_dif/2d/Nsol15/Nsol15_.vtk
+min results/sol_dif/2d/Nsol15.txt
+hout results/sol_dif/2d/Nsol15
+
+fin results/sol_dif/2d/Nsol20.msh
+fout results/sol_dif/2d/Nsol20/Nsol20_.vtk
+min results/sol_dif/2d/Nsol20.txt
+hout results/sol_dif/2d/Nsol20
+
+fin results/sol_dif/2d/1sol1.msh
+fout results/sol_dif/2d/1sol1/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1
+
+fin results/sol_dif/2d/1sol1_7.msh
+fout results/sol_dif/2d/1sol1_7/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_7
+
+fin results/sol_dif/2d/1sol1_6.msh
+fout results/sol_dif/2d/1sol1_6/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_6
+
+fin results/sol_dif/2d/1sol1_5.msh
+fout results/sol_dif/2d/1sol1_5/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_5
+
+fin results/sol_dif/2d/1sol1_4.msh
+fout results/sol_dif/2d/1sol1_4/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_4
+
+fin results/sol_dif/2d/1sol1_3.msh
+fout results/sol_dif/2d/1sol1_3/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_3
+
+fin results/sol_dif/2d/1sol1_2.msh
+fout results/sol_dif/2d/1sol1_2/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_2
+
+fin results/sol_dif/2d/1sol1_1.msh
+fout results/sol_dif/2d/1sol1_1/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_1
+
+fin results/sol_dif/2d/1sol1_0.msh
+fout results/sol_dif/2d/1sol1_0/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_0
+
+fin results/sol_dif/2d/1sol1_R.msh
+fout results/sol_dif/2d/1sol1_R/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_R
+
+fin results/sol_dif/2d/1sol1_RR.msh
+fout results/sol_dif/2d/1sol1_RR/1sol1_.vtk
+min results/sol_dif/2d/1sol1.txt
+hout results/sol_dif/2d/1sol1_RR
+
+fin results/swm_tes/2d/1sol1.msh
+fout results/swm_tes/2d/1sol1/1sol1_.vtk
+min results/swm_tes/2d/1sol1.txt
+hout results/swm_tes/2d/1sol1
+
+-fin results/trap/channel_clean.msh
+-fout results/trap/channel_clean/channel_.vtk
+-min results/trap/channel.txt
+-hout results/trap/channel_clean
+
+fin results/sol_asc/gota_g.msh
+fout results/sol_asc/gota_g/gota_g.vtk
+min results/sol_asc/channel.txt
+hout results/sol_asc/gota_g
