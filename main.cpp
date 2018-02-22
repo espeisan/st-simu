@@ -1608,7 +1608,7 @@ PetscErrorCode AppCtx::setInitialConditions()
 
   // normals at boundary points (n01,n02,n03, n11,n12,n13, n21,n22,n23, ..., 0) following node order .geo
   getVecNormals(&Vec_x_0, Vec_normal);  //std::cout << VecView(Vec_normal,PETSC_VIEWER_STDOUT_WORLD)
-  //Assembly(Vec_normal); View(Vec_normal,"matrizes/nr0.m","nrm0"); View(Vec_x_0,"matrizes/vx0.m","vxv0");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
+  Assembly(Vec_normal); View(Vec_normal,"matrizes/nr0.m","nrm0"); View(Vec_x_0,"matrizes/vx0.m","vxv0");//VecView(Vec_uzp_0,PETSC_VIEWER_STDOUT_WORLD);
 
   // compute mesh sizes
   getMeshSizes();
@@ -1681,7 +1681,7 @@ PetscErrorCode AppCtx::setInitialConditions()
     }
   } // end point loop
   View(Vec_x_0,"matrizes/xv0.m","x0");
-  View(Vec_slipv_0,"matrizes/sv0.m","s0");
+  if (is_sslv){View(Vec_slipv_0,"matrizes/sv0.m","s0");}
   View(Vec_tangent,"matrizes/tv0.m","t0");
   View(Vec_normal,"matrizes/nr0.m","n0");
   if (true) {getFromBSV();}  //to calculate the analitical squirmer velocity
@@ -1697,7 +1697,7 @@ PetscErrorCode AppCtx::setInitialConditions()
   //plotFiles();
   // remember: Vec_normals follows the Vec_x_1
   calcMeshVelocity(Vec_x_0, Vec_uzp_0, Vec_uzp_1, 1.0, Vec_v_mid, 0.0); //Vec_up_0 = Vec_up_1, vtheta = 1.0, mean b.c. = Vec_up_1 = Vec_v_mid init. guess SNESSolve
-  View(Vec_slipv_1,"matrizes/sv1.m","s1");
+  if (is_sslv){View(Vec_slipv_1,"matrizes/sv1.m","s1");}
   // move the mesh
   VecWAXPY(Vec_x_1, dt, Vec_v_mid, Vec_x_0); // Vec_x_1 = dt*Vec_v_mid + Vec_x_0 // for zero Dir. cond. solution lin. elast. is Vec_v_mid = 0
   View(Vec_x_1,"matrizes/xv1.m","x1");
@@ -2156,7 +2156,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
     if (solve_the_sys)
     {
 
-      if (fprint_hgv){
+      if (fprint_hgv && is_sfip){
         if ((time_step%print_step)==0 || time_step == (maxts-1)){
           getSolidVolume();
           for (int S = 0; S < LZ*N_Solids; S++){
@@ -2189,7 +2189,7 @@ PetscErrorCode AppCtx::solveTimeProblem()
           filv.close();
         }
       }
-      if (is_basic && !unsteady && time_step > 0){
+      if (is_basic && !unsteady && time_step > 0 && maxts == 2){
         plotFiles();
         cout << "\n==========================================\n";
         cout << "stop reason:\n";
@@ -3775,7 +3775,7 @@ void AppCtx::getFromBSV() //Body Slip Velocity
     Wsol = -(3.0/(8.0*Pi))*TWsol;
   }
   cout << "Real Velocities:" << endl
-       << Vsol.transpose() << "   " << Wsol.transpose() <<  endl;
+       << "Translation = " << Vsol.transpose() << ", Rotation = " << Wsol.transpose() <<  endl;
 }
 
 Vector AppCtx::u_exacta(Vector const& X, double t, int tag)

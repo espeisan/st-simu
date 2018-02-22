@@ -847,14 +847,6 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       curvf = bcell==1 && ccell==2 && is_curvt;  nPer = 0;
       if (curvf){
         while (!is_in(tag_pt1, fluidonly_tags)){
-          //cell_nodes_tmp = cell_nodes;
-          //cell_nodes(0) = cell_nodes_tmp(1);
-          //cell_nodes(1) = cell_nodes_tmp(2);
-          //cell_nodes(2) = cell_nodes_tmp(0);
-          // TODO if P2/P1
-          //cell_nodes(3) = cell_nodes_tmp(4);
-          //cell_nodes(4) = cell_nodes_tmp(5);
-          //cell_nodes(5) = cell_nodes_tmp(3);
           cell_nodes = PerM3*cell_nodes; nPer++;  //counts how many permutations
           tag_pt1 = mesh->getNodePtr(cell_nodes(1))->getTag();
         }
@@ -865,14 +857,6 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       dof_handler[DH_MESH].getVariable(VAR_M).getCellDofs(mapM_c.data(), &*cell);  //cout << mapM_c.transpose() << endl;  //unk. global ID's
       dof_handler[DH_UNKM].getVariable(VAR_U).getCellDofs(mapU_c.data(), &*cell);  //cout << mapU_c.transpose() << endl;
       dof_handler[DH_UNKM].getVariable(VAR_P).getCellDofs(mapP_c.data(), &*cell);  //cout << mapP_c.transpose() << endl;
-
-      if (curvf){
-        for (int l = 0; l < nPer; l++){
-          mapM_c = PerM6*mapM_c;  cout << mapM_c.transpose() << endl;
-          mapU_c = PerM6*mapU_c;  cout << mapU_c.transpose() << endl;
-          mapP_c = PerM3*mapP_c;  cout << mapP_c.transpose() << endl;
-        }
-      }
 
       if (is_sfip){
         mapZ_c = -VectorXi::Ones(nodes_per_cell*LZ);
@@ -901,6 +885,17 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
       }
       //for (int j = 0; j < nodes_per_cell; j++) {cout << SV_c[j] << " ";} cout << endl;
       //cout << mapZ_c.transpose() << endl; //VecSetOption(Vec_uzp_0, VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);
+
+      if (curvf){
+        for (int l = 0; l < nPer; l++){
+          mapM_c = PerM6*mapM_c;  //cout << mapM_c.transpose() << endl;
+          mapU_c = PerM6*mapU_c;  //cout << mapU_c.transpose() << endl;
+          mapP_c = PerM3*mapP_c;  //cout << mapP_c.transpose() << endl;
+          mapU_t = PerM6*mapU_t;  //cout << mapU_t.transpose() << endl;
+        }
+      }
+
+
       u_coefs_c_old = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
       u_coefs_c_new = MatrixXd::Zero(n_dofs_u_per_cell/dim,dim);
       z_coefs_c_old = MatrixXd::Zero(n_dofs_z_per_cell/LZ,LZ);
@@ -1041,8 +1036,9 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
         }
         double const uconv = (u_coefs_c_old - v_coefs_c_mid + uz_coefs_c_old.transpose()).lpNorm<Infinity>();
 
-        tauk = 4.*visc/hk2 + 2.*rho*uconv/sqrt(hk2);
-        tauk = 1./tauk;
+        //tauk = 4.*visc/hk2 + 2.*rho*uconv/sqrt(hk2);
+        //tauk = 1./tauk;
+        tauk = hk2/(12.0*visc);
         if (dim==3)
           tauk *= 0.1;
 
@@ -1551,7 +1547,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
 
 //cout << "\n" << FUloc << endl; cout << "\n" << Aloc << endl; cout << "\n" << Gloc << endl; cout << "\n" << Dloc << endl;
       // Projection - to force non-penetrarion bc
-      mesh->getCellNodesId(&*cell, cell_nodes.data());
+      mesh->getCellNodesId(&*cell, cell_nodes.data());  //cout << cell_nodes.transpose() << endl;
       getProjectorMatrix(Prj, nodes_per_cell, cell_nodes.data(), Vec_x_1, current_time+dt, *this);
       FUloc = Prj*FUloc;
       Aloc = Prj*Aloc*Prj;
@@ -2179,7 +2175,7 @@ PetscErrorCode AppCtx::formFunction_fs(SNES /*snes*/, Vec Vec_uzp_k, Vec Vec_fun
             }
           }
 
-          if (false) // semi-implicit term //inicialmente false
+          if (true) // semi-implicit term //inicialmente false
           {
             for (int i = 0; i < n_dofs_u_per_facet/dim; ++i)
               for (int j = 0; j < n_dofs_u_per_facet/dim; ++j)

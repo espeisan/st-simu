@@ -1452,7 +1452,7 @@ PetscErrorCode AppCtx::calcMeshVelocity(Vec const& Vec_x_0, Vec const& Vec_up_0,
   //sprintf(buf1,"matrizes/vmid1_%d.m",time_step); sprintf(buf2,"vmidm1_%d",time_step); View(Vec_v_mid, buf1, buf2);
   if (!force_mesh_velocity)
   {
-    cout << "Mesh solver" << endl;
+    cout << "\nMesh solver" << endl;
     ierr = SNESSolve(snes_m, PETSC_NULL, Vec_v_mid);  CHKERRQ(ierr);
   }
   //View(Vec_v_mid,"matrizes/vmid2.m","vmidm2");
